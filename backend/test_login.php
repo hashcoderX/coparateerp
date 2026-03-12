@@ -2,7 +2,7 @@
 
 $url = 'http://localhost:8000/api/login';
 $data = json_encode([
-    'email' => 'superadmin@softcodelk.com',
+    'email' => 'superadmin@sofcodelk.com',
     'password' => 'password'
 ]);
 

@@ -5,6 +5,16 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import axios from 'axios';
 
+interface LoadItem {
+  id: number;
+  load_id: number;
+  product_code: string;
+  name: string;
+  type: string;
+  qty: number;
+  sell_price: number;
+}
+
 export default function VehicleLoading() {
   const [token, setToken] = useState('');
   const [activeLoads, setActiveLoads] = useState(0);
@@ -16,6 +26,11 @@ export default function VehicleLoading() {
   const [completedLoads, setCompletedLoads] = useState(0);
   const [totalCapacity, setTotalCapacity] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [recentLoads, setRecentLoads] = useState<any[]>([]);
+  const [showLoadItemsModal, setShowLoadItemsModal] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [selectedLoad, setSelectedLoad] = useState<any | null>(null);
+  const [selectedLoadItems, setSelectedLoadItems] = useState<LoadItem[]>([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -37,21 +52,77 @@ export default function VehicleLoading() {
     try {
       setLoading(true);
 
-      // Mock data for now - replace with actual API calls when backend is ready
-      setActiveLoads(12);
-      setTotalVehicles(25);
-      setAvailableVehicles(8);
-      setTotalDrivers(20);
-      setActiveRoutes(15);
-      setPendingLoads(5);
-      setCompletedLoads(47);
-      setTotalCapacity(1250); // tons
+      // Fetch vehicles data
+      const vehiclesResponse = await axios.get('http://localhost:8000/api/vehicle-loading/vehicles', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const vehicles = vehiclesResponse.data || [];
+      const totalVehicles = vehicles.length;
+      const availableVehicles = vehicles.filter((v: any) => v.status === 'active').length;
+      const totalCapacity = vehicles.reduce((sum: number, v: any) => sum + (v.capacity_kg || 0), 0);
+
+      // Fetch loads data
+      const loadsResponse = await axios.get('http://localhost:8000/api/vehicle-loading/loads', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const loads = loadsResponse.data || [];
+      const activeLoads = loads.filter((l: any) => l.status === 'in_transit').length;
+      const pendingLoads = loads.filter((l: any) => l.status === 'pending').length;
+      const completedLoads = loads.filter((l: any) => l.status === 'delivered').length;
+
+      // Fetch routes data
+      const routesResponse = await axios.get('http://localhost:8000/api/vehicle-loading/routes', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const routes = routesResponse.data || [];
+      const activeRoutes = routes.length; // Assuming all routes are active
+
+      // Fetch drivers data (employees with Driver designation)
+      const employeesResponse = await axios.get('http://localhost:8000/api/hr/employees', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const employees = employeesResponse.data.data || employeesResponse.data || [];
+      const totalDrivers = employees.filter((e: any) => e.designation?.name === 'Driver').length;
+
+      // Fetch recent loads (last 5 loads)
+      const recentLoadsData = loads
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 5);
+      setRecentLoads(recentLoadsData);
 
       setLoading(false);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       setLoading(false);
     }
+  };
+
+  const handleViewLoadItems = async (load: any) => {
+    try {
+      setShowLoadItemsModal(true);
+      setModalLoading(true);
+      setSelectedLoad(load);
+      setSelectedLoadItems([]);
+
+      const response = await axios.get('http://localhost:8000/api/vehicle-loading/load-items', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { load_id: load.id }
+      });
+
+      setSelectedLoadItems(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('Error fetching load items:', error);
+      setSelectedLoadItems([]);
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const totalSelectedQty = selectedLoadItems.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+
+  const getPersonName = (person: any) => {
+    if (!person) return '-';
+    return person.name || `${person.first_name || ''} ${person.last_name || ''}`.trim() || '-';
   };
 
   const stats = [
@@ -201,34 +272,132 @@ export default function VehicleLoading() {
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Activity</h2>
         <div className="space-y-4">
-          <div className="flex items-center p-4 bg-gray-50 rounded-lg">
-            <span className="text-xl mr-3">🚛</span>
-            <div className="flex-1">
-              <p className="font-medium text-gray-900">Load #VL-2024-001 dispatched</p>
-              <p className="text-sm text-gray-600">Vehicle TRK-001 en route to Colombo • 2 hours ago</p>
+          {recentLoads.length === 0 ? (
+            <div className="text-center py-8">
+              <span className="text-4xl">📦</span>
+              <p className="text-gray-500 mt-2">No recent loads</p>
             </div>
-            <span className="text-sm text-green-600 font-medium">In Transit</span>
-          </div>
-
-          <div className="flex items-center p-4 bg-gray-50 rounded-lg">
-            <span className="text-xl mr-3">✅</span>
-            <div className="flex-1">
-              <p className="font-medium text-gray-900">Load #VL-2024-002 delivered</p>
-              <p className="text-sm text-gray-600">Successfully delivered to Kandy warehouse • 4 hours ago</p>
-            </div>
-            <span className="text-sm text-blue-600 font-medium">Completed</span>
-          </div>
-
-          <div className="flex items-center p-4 bg-gray-50 rounded-lg">
-            <span className="text-xl mr-3">⚠️</span>
-            <div className="flex-1">
-              <p className="font-medium text-gray-900">Vehicle TRK-005 maintenance due</p>
-              <p className="text-sm text-gray-600">Scheduled maintenance in 2 days • 6 hours ago</p>
-            </div>
-            <span className="text-sm text-orange-600 font-medium">Pending</span>
-          </div>
+          ) : (
+            recentLoads.map((load) => (
+              <button
+                key={load.id}
+                type="button"
+                onClick={() => handleViewLoadItems(load)}
+                className="w-full text-left flex items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <span className="text-xl mr-3">
+                  {load.status === 'in_transit' ? '🚛' : load.status === 'delivered' ? '✅' : load.status === 'pending' ? '⏳' : '📦'}
+                </span>
+                <div className="flex-1">
+                  <p className="font-medium text-gray-900">Load #{load.load_number}</p>
+                  <p className="text-sm text-gray-600">
+                    {load.vehicle?.registration_number || 'Unknown vehicle'} • 
+                    {load.route?.destination || 'Unknown destination'} • 
+                    {new Date(load.created_at).toLocaleDateString()}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Click to view item-wise available quantity in vehicle</p>
+                </div>
+                <span className={`text-sm font-medium ${
+                  load.status === 'in_transit' ? 'text-green-600' :
+                  load.status === 'delivered' ? 'text-blue-600' :
+                  load.status === 'pending' ? 'text-orange-600' :
+                  'text-gray-600'
+                }`}>
+                  {load.status === 'in_transit' ? 'In Transit' :
+                   load.status === 'delivered' ? 'Completed' :
+                   load.status === 'pending' ? 'Pending' :
+                   load.status}
+                </span>
+              </button>
+            ))
+          )}
         </div>
       </div>
+
+      {showLoadItemsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Vehicle Load Item Availability</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLoadItemsModal(false);
+                  setSelectedLoad(null);
+                  setSelectedLoadItems([]);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {selectedLoad && (
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                  <div className="bg-gray-50 rounded-md p-3">
+                    <p className="text-xs text-gray-500 uppercase">Load Number</p>
+                    <p className="text-sm font-semibold text-gray-900">{selectedLoad.load_number}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-md p-3">
+                    <p className="text-xs text-gray-500 uppercase">Vehicle</p>
+                    <p className="text-sm font-semibold text-gray-900">{selectedLoad.vehicle?.registration_number || '-'}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-md p-3">
+                    <p className="text-xs text-gray-500 uppercase">Status</p>
+                    <p className="text-sm font-semibold text-gray-900">{(selectedLoad.status || '-').replace('_', ' ')}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-md p-3">
+                    <p className="text-xs text-gray-500 uppercase">Driver</p>
+                    <p className="text-sm font-semibold text-gray-900">{getPersonName(selectedLoad.driver)}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-md p-3">
+                    <p className="text-xs text-gray-500 uppercase">Sales Ref</p>
+                    <p className="text-sm font-semibold text-gray-900">{getPersonName(selectedLoad.sales_ref || selectedLoad.salesRef)}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-md p-3">
+                    <p className="text-xs text-gray-500 uppercase">Total Qty</p>
+                    <p className="text-sm font-semibold text-gray-900">{totalSelectedQty.toFixed(2)}</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product Code</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Item Name</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Available Qty In Vehicle</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {modalLoading ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-500">Loading item list...</td>
+                      </tr>
+                    ) : selectedLoadItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-500">No items available for this vehicle load.</td>
+                      </tr>
+                    ) : (
+                      selectedLoadItems.map((item) => (
+                        <tr key={item.id}>
+                          <td className="px-4 py-2 text-sm text-gray-700">{item.product_code}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">{item.name}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">{item.type.replace('_', ' ')}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700 text-right font-medium">{Number(item.qty).toFixed(2)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

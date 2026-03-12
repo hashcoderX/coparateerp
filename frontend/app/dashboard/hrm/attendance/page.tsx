@@ -294,8 +294,8 @@ export default function AttendancePage() {
       {/* Navigation */}
       <nav className="relative z-10 bg-white/80 backdrop-blur-lg shadow-lg border-b border-white/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center h-auto sm:h-16 py-3 sm:py-0 gap-3 sm:gap-0">
+            <div className="flex items-center justify-between sm:justify-start">
               <button onClick={() => router.push('/dashboard/hrm')} className="flex items-center space-x-2 text-gray-700 hover:text-orange-600 transition-colors duration-300">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -303,11 +303,11 @@ export default function AttendancePage() {
                 <span className="font-medium">Back to HRM</span>
               </button>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center justify-between sm:justify-end space-x-2">
               <div className="w-8 h-8 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center text-white text-sm font-bold">
                 AT
               </div>
-              <span className="font-medium text-gray-900">Attendance</span>
+              <span className="font-medium text-gray-900 text-sm sm:text-base">Attendance</span>
             </div>
           </div>
         </div>
@@ -321,17 +321,17 @@ export default function AttendancePage() {
               <span className="text-4xl">📅</span>
             </div>
           </div>
-          <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-3">
+          <h2 className="text-3xl md:text-5xl font-bold text-gray-900 mb-3">
             Attendance <span className="bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">Manager</span>
           </h2>
-          <p className="text-lg text-gray-600 max-w-3xl mx-auto leading-relaxed">
+          <p className="text-base sm:text-lg text-gray-600 max-w-3xl mx-auto leading-relaxed px-1">
             Manage employee attendance with quick marking, CSV uploads, and history tracking.
           </p>
         </div>
 
         {/* Tabs */}
         <div className="mb-6 flex justify-center">
-          <div className="bg-white/70 backdrop-blur-sm rounded-full p-1 shadow-lg">
+          <div className="bg-white/70 backdrop-blur-sm rounded-full p-1 shadow-lg inline-flex max-w-full overflow-x-auto">
             <button
               onClick={() => setActiveTab('mark')}
               className={`px-6 py-2 rounded-full font-medium transition-all duration-300 ${

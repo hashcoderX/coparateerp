@@ -18,6 +18,8 @@ class InventoryItem extends Model
         'minimum_stock',
         'maximum_stock',
         'unit_price',
+        'purchase_price',
+        'sell_price',
         'supplier_name',
         'supplier_id',
         'location',
@@ -31,6 +33,8 @@ class InventoryItem extends Model
         'minimum_stock' => 'decimal:2',
         'maximum_stock' => 'decimal:2',
         'unit_price' => 'decimal:2',
+        'purchase_price' => 'decimal:2',
+        'sell_price' => 'decimal:2',
         'expiry_date' => 'date',
         'additional_info' => 'array',
     ];

@@ -33,16 +33,45 @@ export default function StockManagement() {
     try {
       setLoading(true);
 
-      // Simulate API calls - replace with actual endpoints when available
-      // For now, using placeholder data
-      setTotalItems(1250);
-      setLowStockItems(23);
-      setTotalSuppliers(45);
-      setOutOfStockItems(5);
+      const [inventoryResponse, suppliersResponse] = await Promise.all([
+        axios.get('http://localhost:8000/api/stock/inventory', {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { per_page: 1000 }
+        }),
+        axios.get('http://localhost:8000/api/stock/suppliers', {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { per_page: 1000 }
+        })
+      ]);
+
+      const inventoryItems = inventoryResponse.data?.success
+        ? (inventoryResponse.data?.data?.data || inventoryResponse.data?.data || [])
+        : [];
+
+      const suppliers = suppliersResponse.data?.success
+        ? (suppliersResponse.data?.data?.data || suppliersResponse.data?.data || [])
+        : [];
+
+      const lowStockCount = inventoryItems.filter((item: any) => {
+        const currentStock = Number(item.current_stock) || 0;
+        const minimumStock = Number(item.minimum_stock) || 0;
+        return currentStock <= minimumStock;
+      }).length;
+
+      const outOfStockCount = inventoryItems.filter((item: any) => (Number(item.current_stock) || 0) <= 0).length;
+
+      setTotalItems(inventoryItems.length);
+      setLowStockItems(lowStockCount);
+      setTotalSuppliers(suppliers.length);
+      setOutOfStockItems(outOfStockCount);
 
       setLoading(false);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      setTotalItems(0);
+      setLowStockItems(0);
+      setTotalSuppliers(0);
+      setOutOfStockItems(0);
       setLoading(false);
     }
   };
@@ -174,7 +203,7 @@ export default function StockManagement() {
           <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
             Quick Actions
           </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <Link
               href="/dashboard/stock/inventory"
               className="relative block w-full bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg p-4 text-center focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 transition-colors"
@@ -212,6 +241,16 @@ export default function StockManagement() {
               <div className="flex items-center justify-center">
                 <span className="text-2xl mr-2">📈</span>
                 <span className="text-sm font-medium text-purple-900">Generate Reports</span>
+              </div>
+            </Link>
+
+            <Link
+              href="/dashboard/stock/transfers"
+              className="relative block w-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg p-4 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+            >
+              <div className="flex items-center justify-center">
+                <span className="text-2xl mr-2">🔄</span>
+                <span className="text-sm font-medium text-indigo-900">Transfer to Outlets</span>
               </div>
             </Link>
           </div>

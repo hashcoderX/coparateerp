@@ -55,18 +55,18 @@ export default function Dashboard() {
       {/* Modern Navigation */}
       <nav className="relative z-10 bg-white/80 backdrop-blur-lg shadow-lg border-b border-white/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
+          <div className="flex flex-col sm:flex-row justify-between sm:h-16 h-auto py-3 sm:py-0 gap-3 sm:gap-0">
+            <div className="flex items-center justify-between sm:justify-start">
               <div className="flex-shrink-0 flex items-center space-x-3">
                 <div className="w-8 h-8 bg-gradient-to-r from-red-500 to-pink-500 rounded-lg flex items-center justify-center">
                   <span className="text-white font-bold text-sm">BMS</span>
                 </div>
-                <h1 className="text-gray-900 text-xl font-bold bg-gradient-to-r from-red-600 to-pink-600 bg-clip-text text-transparent">
+                <h1 className="text-gray-900 text-lg sm:text-xl font-bold bg-gradient-to-r from-red-600 to-pink-600 bg-clip-text text-transparent">
                   Business Management System
                 </h1>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center justify-between sm:justify-end space-x-3 sm:space-x-4">
               <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                 <span>System Online</span>
@@ -93,11 +93,11 @@ export default function Dashboard() {
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
             Welcome to <span className="bg-gradient-to-r from-red-600 to-pink-600 bg-clip-text text-transparent">BMS</span>
           </h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
+          <p className="text-lg sm:text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed px-1">
             Transform your business operations with our comprehensive management suite.
             Streamline processes, boost productivity, and drive growth with intelligent automation.
           </p>
-          <div className="flex justify-center mt-6 space-x-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center mt-6 gap-2 sm:space-x-4">
             <div className="flex items-center space-x-2 text-sm text-gray-500">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
               <span>All Systems Operational</span>
@@ -125,11 +125,11 @@ export default function Dashboard() {
                   // TODO: Implement Production module
                   alert('Production module coming soon!');
                 } else if (module.name === 'Purchasing') {
-                  // TODO: Implement Purchasing module
-                  alert('Purchasing module coming soon!');
+                  router.push('/dashboard/purchasing');
                 } else if (module.name === 'Outlets') {
-                  // TODO: Implement Outlets module
-                  alert('Outlets module coming soon!');
+                  router.push('/dashboard/outlets');
+                } else if (module.name === 'Distribution') {
+                  router.push('/dashboard/distribution');
                 }
               }}
               className={`group relative bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 cursor-pointer border border-white/20 overflow-hidden transform hover:-translate-y-2 hover:scale-105 ${
@@ -169,6 +169,8 @@ export default function Dashboard() {
                       ? 'Handle procurement and supplier management'
                       : module.name === 'Outlets'
                       ? 'Manage retail outlets and sales points'
+                      : module.name === 'Distribution'
+                      ? 'Manage customers, invoices, returns and payments'
                       : 'Access comprehensive management tools'
                     }
                   </p>

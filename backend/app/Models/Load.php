@@ -12,6 +12,7 @@ class Load extends Model
         'load_number',
         'vehicle_id',
         'driver_id',
+        'sales_ref_id',
         'route_id',
         'status',
         'load_date',
@@ -39,6 +40,11 @@ class Load extends Model
     public function route(): BelongsTo
     {
         return $this->belongsTo(Route::class);
+    }
+
+    public function salesRef(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'sales_ref_id');
     }
 
     public function loadItems(): HasMany

@@ -32,6 +32,7 @@ interface Employee {
   overtime_payment_per_hour?: number;
   deduction_late_hour?: number;
   status: 'active' | 'inactive';
+  user?: { role?: string };
   department: { id: number; name: string };
   designation: { id: number; name: string };
   branch: { id: number; name: string };
@@ -131,6 +132,7 @@ export default function Employees() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState('employee');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [photoPath, setPhotoPath] = useState('');
@@ -272,9 +274,21 @@ export default function Employees() {
       const response = await axios.get('http://localhost:8000/api/hr/employees', {
         headers: { Authorization: `Bearer ${tokenToUse}` },
       });
-      setEmployees(response.data.data || []);
+
+      const employeeData = Array.isArray(response.data)
+        ? response.data
+        : (response.data?.data || []);
+
+      const normalizedEmployees: Employee[] = employeeData.map((employee: any) => ({
+        ...employee,
+        phone: employee.phone ?? employee.mobile ?? '',
+        hire_date: employee.hire_date ?? employee.join_date ?? '',
+      }));
+
+      setEmployees(normalizedEmployees);
     } catch (error) {
       console.error('Error fetching employees:', error);
+      setEmployees([]);
     }
   };
 
@@ -340,6 +354,7 @@ export default function Employees() {
     setLastName('');
     setEmail('');
     setPassword('');
+    setRole('employee');
     setPhone('');
     setAddress('');
     setPhotoPath('');
@@ -414,6 +429,7 @@ export default function Employees() {
     setLastName(employee.last_name);
     setEmail(employee.email);
     setPhone(employee.phone);
+    setRole(employee.user?.role || 'employee');
     setAddress(employee.address);
     setPhotoPath((employee as any)?.photo_path || '');
     setDateOfBirth(employee.date_of_birth);
@@ -815,8 +831,8 @@ export default function Employees() {
       {/* Modern Navigation */}
       <nav className="relative z-10 bg-white/80 backdrop-blur-lg shadow-lg border-b border-white/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center h-auto sm:h-16 py-3 gap-3">
+            <div className="flex items-center justify-between sm:justify-start gap-3">
               <button
                 onClick={() => router.push('/dashboard/hrm')}
                 className="flex items-center space-x-2 text-gray-700 hover:text-blue-600 transition-colors duration-300"
@@ -824,10 +840,10 @@ export default function Employees() {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                <span className="font-medium">Back to HRM</span>
+                <span className="font-medium text-sm sm:text-base">Back to HRM</span>
               </button>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                 <span>Employee System Active</span>
@@ -851,44 +867,46 @@ export default function Employees() {
 
       <main className="relative z-10 max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         {/* Hero Section */}
-        <div className="mb-8 flex justify-between items-start">
+        <div className="mb-8 flex flex-col md:flex-row md:items-start md:justify-between gap-6 md:gap-8">
           <div>
             <div className="flex items-center space-x-3 mb-4">
               <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center text-2xl shadow-lg">
                 👥
               </div>
               <div>
-                <h2 className="text-3xl font-bold text-gray-900">Employee Management</h2>
-                <p className="text-gray-600">Manage your workforce efficiently with comprehensive employee tools</p>
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">Employee Management</h2>
+                <p className="text-sm sm:text-base md:text-lg text-gray-600">Manage your workforce efficiently with comprehensive employee tools</p>
               </div>
             </div>
-            <div className="flex space-x-6">
+            <div className="flex flex-col sm:flex-row gap-4 sm:space-x-6 sm:gap-0 mt-2 sm:mt-4">
               <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">{employees.length}</div>
+                <div className="text-xl sm:text-2xl font-bold text-blue-600">{employees.length}</div>
                 <div className="text-sm text-gray-500">Total Employees</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">{employees.filter(e => e.status === 'active').length}</div>
+                <div className="text-xl sm:text-2xl font-bold text-green-600">{employees.filter(e => e.status === 'active').length}</div>
                 <div className="text-sm text-gray-500">Active Employees</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-purple-600">{departments.length}</div>
+                <div className="text-xl sm:text-2xl font-bold text-purple-600">{departments.length}</div>
                 <div className="text-sm text-gray-500">Departments</div>
               </div>
             </div>
           </div>
-          <button
-            onClick={() => {
-              resetForm();
-              setShowForm(true);
-            }}
-            className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-6 py-3 rounded-xl text-sm font-medium transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl flex items-center space-x-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            <span>Add Employee</span>
-          </button>
+          <div className="md:flex-shrink-0">
+            <button
+              onClick={() => {
+                resetForm();
+                setShowForm(true);
+              }}
+              className="w-full md:w-auto bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-6 py-3 rounded-xl text-sm font-medium transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              <span>Add Employee</span>
+            </button>
+          </div>
         </div>
 
         {/* Employee List */}
@@ -1141,6 +1159,24 @@ export default function Employees() {
                     minLength={8}
                     placeholder="Minimum 8 characters"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    System Role (auto from Designation)
+                  </label>
+                  <input
+                    type="text"
+                    value={(() => {
+                      const selected = designations.find(d => d.id.toString() === designationId);
+                      return selected?.name || 'Will use Designation as system role';
+                    })()}
+                    disabled
+                    className="w-full px-4 py-3 border border-gray-200 bg-gray-50 rounded-xl text-gray-700 cursor-not-allowed"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    When saving, the user account role will automatically match the selected Designation.
+                  </p>
                 </div>
 
                 <div>

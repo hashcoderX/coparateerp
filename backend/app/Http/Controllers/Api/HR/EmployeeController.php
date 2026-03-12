@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\HR;
 use App\Http\Controllers\Controller;
 use App\Models\Employee;
 use App\Models\User;
+use App\Models\Designation;
 use App\Http\Requests\StoreEmployeeRequest;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -17,7 +18,7 @@ class EmployeeController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Employee::with(['department', 'designation', 'branch']);
+        $query = Employee::with(['department', 'designation', 'branch', 'user:id,employee_id,role,email,name']);
 
         // Filter by authenticated user's tenant/branch if available
         $user = $request->user();
@@ -70,15 +71,20 @@ class EmployeeController extends Controller
         $employee = Employee::create($employeeData);
 
         // Create user account for the employee
+        $employee->load('designation');
+        $designationName = $employee->designation?->name;
+        $userRole = $designationName ?: 'employee';
+
         User::create([
             'name' => $validated['first_name'] . ' ' . $validated['last_name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
+            'role' => $userRole,
             'employee_id' => $employee->id,
             'branch_id' => $validated['branch_id'],
         ]);
 
-        return response()->json($employee->load(['department', 'designation', 'branch']), 201);
+        return response()->json($employee->load(['department', 'designation', 'branch', 'user:id,employee_id,role,email,name']), 201);
     }
 
     /**
@@ -86,7 +92,7 @@ class EmployeeController extends Controller
      */
     public function show(Employee $employee): JsonResponse
     {
-        return response()->json($employee->load(['department', 'designation', 'branch']));
+        return response()->json($employee->load(['department', 'designation', 'branch', 'user:id,employee_id,role,email,name']));
     }
 
     /**
@@ -135,7 +141,14 @@ class EmployeeController extends Controller
 
         $employee->update($updateData);
 
-        return response()->json($employee->load(['department', 'designation', 'branch']));
+        // Keep linked user role in sync with designation
+        $employee->load('designation');
+        $employeeUser = User::where('employee_id', $employee->id)->first();
+        if ($employeeUser && $employee->designation) {
+            $employeeUser->update(['role' => $employee->designation->name]);
+        }
+
+        return response()->json($employee->load(['department', 'designation', 'branch', 'user:id,employee_id,role,email,name']));
     }
 
     /**

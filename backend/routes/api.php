@@ -17,7 +17,7 @@ use App\Http\Controllers\Api\HR\CandidateInterviewController;
 use App\Http\Controllers\Api\HR\EmployeeDocumentController;
 use App\Http\Controllers\Api\HR\EmployeeEducationController;
 use App\Http\Controllers\Api\HR\EmployeeExperienceController;
-use App\Http\Controllers\Api\HR\EmployeeAllowanceDeductionController;
+use App\Http\Controllers\Api\Purchasing\GRNController;
 use App\Models\User;
 use App\Http\Controllers\LoadController;
 use Illuminate\Http\Request;
@@ -29,11 +29,6 @@ Route::get('/user', function (Request $request) {
 
 Route::get('/users', function () {
     return User::all();
-});
-
-Route::get('/reset-password', function () {
-    User::where('email', 'superadmin@sofcodelk.com')->update(['password' => \Illuminate\Support\Facades\Hash::make('password')]);
-    return 'Password reset';
 });
 
 Route::post('/register', [AuthController::class, 'register']);
@@ -121,6 +116,17 @@ Route::middleware('auth:sanctum')->group(function () {
     // Stock Management Routes
     Route::apiResource('stock/suppliers', \App\Http\Controllers\SupplierController::class);
     Route::apiResource('stock/inventory', \App\Http\Controllers\InventoryController::class);
+    Route::apiResource('stock/transfers', \App\Http\Controllers\StockTransferController::class)->only(['index', 'store']);
+    Route::get('stock/transfers/reference/{reference}', [\App\Http\Controllers\StockTransferController::class, 'detailsByReference']);
+
+    // Outlets Management Routes
+    Route::apiResource('outlets', \App\Http\Controllers\OutletController::class);
+    Route::get('outlets/{outlet}/stock-report', [\App\Http\Controllers\OutletController::class, 'stockReport']);
+
+    // Purchasing Routes
+    // Route::apiResource('purchasing/purchase-orders', PurchaseOrderController::class);
+    Route::apiResource('purchasing/purchase-orders', \App\Http\Controllers\Api\Purchasing\PurchaseOrderController::class);
+    Route::apiResource('purchasing/grn', \App\Http\Controllers\Api\Purchasing\GRNController::class);
 
     // Vehicle Loading Routes
     Route::apiResource('vehicle-loading/vehicles', \App\Http\Controllers\VehicleController::class);
@@ -128,4 +134,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('vehicle-loading/loads', LoadController::class);
     Route::apiResource('vehicle-loading/load-items', \App\Http\Controllers\LoadItemController::class);
     Route::post('vehicle-loading/load-items/upload-csv', [\App\Http\Controllers\LoadItemController::class, 'uploadCsv']);
+
+    // Distribution Routes
+    Route::apiResource('distribution/customers', \App\Http\Controllers\DistributionCustomerController::class);
+    Route::apiResource('distribution/invoices', \App\Http\Controllers\DistributionInvoiceController::class);
+    Route::apiResource('distribution/returns', \App\Http\Controllers\DistributionReturnController::class);
+    Route::apiResource('distribution/payments', \App\Http\Controllers\DistributionPaymentController::class);
 });

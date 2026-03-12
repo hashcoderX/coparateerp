@@ -255,17 +255,19 @@ export default function Payroll() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 py-6">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Payroll Management</h1>
-              <p className="text-gray-600 mt-1">Process and manage employee payroll</p>
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">Payroll Management</h1>
+              <p className="text-sm sm:text-base md:text-lg text-gray-600 mt-1">Process and manage employee payroll</p>
             </div>
-            <button
-              onClick={() => setShowGenerateModal(true)}
-              className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-6 py-3 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 shadow-lg"
-            >
-              Generate Payroll
-            </button>
+            <div className="md:flex-shrink-0">
+              <button
+                onClick={() => setShowGenerateModal(true)}
+                className="w-full md:w-auto bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-6 py-3 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 shadow-lg"
+              >
+                Generate Payroll
+              </button>
+            </div>
           </div>
         </div>
       </div>

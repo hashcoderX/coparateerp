@@ -12,9 +12,22 @@ class LoadController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $loads = Load::with(['vehicle', 'driver', 'route'])->get();
+        $user = $request->user();
+
+        $query = Load::with(['vehicle', 'driver', 'salesRef', 'route']);
+
+        if ($user) {
+            $isAdmin = (!$user->employee_id) || $user->hasRole('Super Admin');
+
+            if (!$isAdmin && $user->employee_id) {
+                $query->where('sales_ref_id', $user->employee_id);
+            }
+        }
+
+        $loads = $query->get();
+
         return response()->json($loads);
     }
 
@@ -27,6 +40,7 @@ class LoadController extends Controller
             'load_number' => 'required|string|unique:loads',
             'vehicle_id' => 'required|exists:vehicles,id',
             'driver_id' => 'required|exists:employees,id',
+            'sales_ref_id' => 'nullable|exists:employees,id',
             'route_id' => 'required|exists:routes,id',
             'status' => 'in:pending,in_transit,delivered,cancelled',
             'load_date' => 'required|date|after_or_equal:today',
@@ -46,7 +60,7 @@ class LoadController extends Controller
 
         return response()->json([
             'message' => 'Load created successfully',
-            'load' => $load->load(['vehicle', 'driver', 'route'])
+            'load' => $load->load(['vehicle', 'driver', 'salesRef', 'route'])
         ], 201);
     }
 
@@ -55,7 +69,7 @@ class LoadController extends Controller
      */
     public function show(Load $load): JsonResponse
     {
-        return response()->json($load->load(['vehicle', 'driver', 'route']));
+        return response()->json($load->load(['vehicle', 'driver', 'salesRef', 'route']));
     }
 
     /**
@@ -67,6 +81,7 @@ class LoadController extends Controller
             'load_number' => 'required|string|unique:loads,load_number,' . $load->id,
             'vehicle_id' => 'required|exists:vehicles,id',
             'driver_id' => 'required|exists:employees,id',
+            'sales_ref_id' => 'nullable|exists:employees,id',
             'route_id' => 'required|exists:routes,id',
             'status' => 'in:pending,in_transit,delivered,cancelled',
             'load_date' => 'required|date',
@@ -86,7 +101,7 @@ class LoadController extends Controller
 
         return response()->json([
             'message' => 'Load updated successfully',
-            'load' => $load->load(['vehicle', 'driver', 'route'])
+            'load' => $load->load(['vehicle', 'driver', 'salesRef', 'route'])
         ]);
     }
 

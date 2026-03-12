@@ -32,6 +32,7 @@ interface Load {
   load_number: string;
   vehicle_id: number;
   driver_id: number;
+  sales_ref_id?: number | null;
   route_id: number;
   status: 'pending' | 'in_transit' | 'delivered' | 'cancelled';
   load_date: string;
@@ -48,6 +49,13 @@ interface Load {
     name: string;
     license_number: string;
   };
+  sales_ref?: {
+    id: number;
+    name: string;
+    employee_code: string;
+    first_name: string;
+    last_name: string;
+  };
   route?: {
     id: number;
     name: string;
@@ -56,19 +64,36 @@ interface Load {
   };
 }
 
+interface LoadItem {
+  id: number;
+  load_id: number;
+  product_code: string;
+  name: string;
+  type: string;
+  out_price: number;
+  sell_price: number;
+  qty: number;
+}
+
 export default function LoadsPage() {
   const [token, setToken] = useState('');
   const [loads, setLoads] = useState<Load[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [selectedLoadDetails, setSelectedLoadDetails] = useState<Load | null>(null);
+  const [selectedLoadItems, setSelectedLoadItems] = useState<LoadItem[]>([]);
   const [editingLoad, setEditingLoad] = useState<Load | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [salesRefs, setSalesRefs] = useState<Driver[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [formData, setFormData] = useState({
     load_number: '',
     vehicle_id: '',
     driver_id: '',
+    sales_ref_id: '',
     route_id: '',
     load_date: '',
     total_weight: '',
@@ -131,10 +156,23 @@ export default function LoadsPage() {
           Authorization: `Bearer ${token}`,
         },
       });
-      setDrivers(Array.isArray(response.data) ? response.data : []);
+      const employeeList = Array.isArray(response.data)
+        ? response.data
+        : (response.data?.data || []);
+      const onlyDrivers = employeeList.filter((employee: any) => {
+        const designationName = String(employee?.designation?.name || '').toLowerCase();
+        return designationName.includes('driver');
+      });
+      setDrivers(onlyDrivers);
+      const onlySalesRefs = employeeList.filter((employee: any) => {
+        const designationName = String(employee?.designation?.name || '').toLowerCase();
+        return designationName.includes('sales');
+      });
+      setSalesRefs(onlySalesRefs);
     } catch (error) {
       console.error('Error fetching drivers:', error);
       setDrivers([]);
+      setSalesRefs([]);
     }
   };
 
@@ -159,6 +197,7 @@ export default function LoadsPage() {
         load_number: formData.load_number,
         vehicle_id: parseInt(formData.vehicle_id),
         driver_id: parseInt(formData.driver_id),
+        sales_ref_id: formData.sales_ref_id ? parseInt(formData.sales_ref_id) : null,
         route_id: parseInt(formData.route_id),
         load_date: formData.load_date,
         total_weight: parseFloat(formData.total_weight),
@@ -193,6 +232,7 @@ export default function LoadsPage() {
       load_number: '',
       vehicle_id: '',
       driver_id: '',
+      sales_ref_id: '',
       route_id: '',
       load_date: '',
       total_weight: '',
@@ -225,6 +265,7 @@ export default function LoadsPage() {
       load_number: load.load_number,
       vehicle_id: load.vehicle_id.toString(),
       driver_id: load.driver_id.toString(),
+      sales_ref_id: load.sales_ref_id ? load.sales_ref_id.toString() : '',
       route_id: load.route_id.toString(),
       load_date: load.load_date,
       total_weight: load.total_weight.toString(),
@@ -246,6 +287,162 @@ export default function LoadsPage() {
         console.error('Error deleting load:', error);
       }
     }
+  };
+
+  const handleViewDetails = async (loadId: number) => {
+    try {
+      setShowDetailsModal(true);
+      setDetailsLoading(true);
+      setSelectedLoadDetails(null);
+      setSelectedLoadItems([]);
+
+      const [loadRes, itemsRes] = await Promise.all([
+        axios.get(`http://localhost:8000/api/vehicle-loading/loads/${loadId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        axios.get('http://localhost:8000/api/vehicle-loading/load-items', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          params: { load_id: loadId },
+        }),
+      ]);
+
+      setSelectedLoadDetails(loadRes.data);
+      setSelectedLoadItems(Array.isArray(itemsRes.data) ? itemsRes.data : []);
+    } catch (error) {
+      console.error('Error fetching load details:', error);
+      alert('Failed to load vehicle load details');
+      setShowDetailsModal(false);
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const handlePrintDetails = () => {
+    if (!selectedLoadDetails) return;
+
+    const win = window.open('', '_blank', 'width=1000,height=800');
+    if (!win) {
+      alert('Unable to open print window. Please allow popups.');
+      return;
+    }
+
+    const rows = selectedLoadItems
+      .map((item) => `
+        <tr>
+          <td style="padding:8px;border:1px solid #ddd;">${item.product_code}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${item.name}</td>
+          <td style="padding:8px;border:1px solid #ddd;">${item.type}</td>
+          <td style="padding:8px;border:1px solid #ddd;text-align:right;">${Number(item.qty).toFixed(2)}</td>
+          <td style="padding:8px;border:1px solid #ddd;text-align:right;">${Number(item.sell_price).toFixed(2)}</td>
+        </tr>
+      `)
+      .join('');
+
+    win.document.write(`
+      <html>
+        <head>
+          <title>Load ${selectedLoadDetails.load_number}</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; padding: 20px; color: #111;">
+          <h2 style="margin-bottom: 6px;">Vehicle Load Details</h2>
+          <p style="margin: 2px 0;"><strong>Load Number:</strong> ${selectedLoadDetails.load_number}</p>
+          <p style="margin: 2px 0;"><strong>Status:</strong> ${selectedLoadDetails.status.replace('_', ' ')}</p>
+          <p style="margin: 2px 0;"><strong>Load Date:</strong> ${new Date(selectedLoadDetails.load_date).toLocaleDateString()}</p>
+          <p style="margin: 2px 0;"><strong>Delivery Date:</strong> ${selectedLoadDetails.delivery_date ? new Date(selectedLoadDetails.delivery_date).toLocaleDateString() : '-'}</p>
+          <p style="margin: 2px 0;"><strong>Vehicle:</strong> ${selectedLoadDetails.vehicle?.registration_number || '-'} (${selectedLoadDetails.vehicle?.type || '-'})</p>
+          <p style="margin: 2px 0;"><strong>Driver:</strong> ${selectedLoadDetails.driver?.name || '-'}</p>
+          <p style="margin: 2px 0;"><strong>Sales Ref:</strong> ${selectedLoadDetails.sales_ref?.name || `${selectedLoadDetails.sales_ref?.first_name || ''} ${selectedLoadDetails.sales_ref?.last_name || ''}`.trim() || '-'}</p>
+          <p style="margin: 2px 0;"><strong>Route:</strong> ${selectedLoadDetails.route?.name || '-'} (${selectedLoadDetails.route?.origin || '-'} → ${selectedLoadDetails.route?.destination || '-'})</p>
+          <p style="margin: 2px 0;"><strong>Total Weight:</strong> ${Number(selectedLoadDetails.total_weight).toFixed(2)} kg</p>
+          <p style="margin: 2px 0;"><strong>Notes:</strong> ${selectedLoadDetails.notes || '-'}</p>
+
+          <h3 style="margin-top: 16px;">Load Items</h3>
+          <table style="margin-top: 8px; width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr>
+                <th style="padding:8px;border:1px solid #ddd;text-align:left;">Product Code</th>
+                <th style="padding:8px;border:1px solid #ddd;text-align:left;">Name</th>
+                <th style="padding:8px;border:1px solid #ddd;text-align:left;">Type</th>
+                <th style="padding:8px;border:1px solid #ddd;text-align:right;">Qty</th>
+                <th style="padding:8px;border:1px solid #ddd;text-align:right;">Sell Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || '<tr><td colspan="5" style="padding:8px;border:1px solid #ddd;text-align:center;">No items found</td></tr>'}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  const handleDownloadDetails = () => {
+    if (!selectedLoadDetails) return;
+
+    const header = [
+      'Load Number',
+      'Status',
+      'Load Date',
+      'Delivery Date',
+      'Vehicle',
+      'Driver',
+      'Sales Ref',
+      'Route',
+      'Total Weight (kg)',
+      'Product Code',
+      'Item Name',
+      'Type',
+      'Qty',
+      'Sell Price',
+      'Notes',
+    ];
+
+    const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const common = [
+      selectedLoadDetails.load_number,
+      selectedLoadDetails.status,
+      selectedLoadDetails.load_date,
+      selectedLoadDetails.delivery_date || '',
+      selectedLoadDetails.vehicle?.registration_number || '',
+      selectedLoadDetails.driver?.name || '',
+      selectedLoadDetails.sales_ref?.name || `${selectedLoadDetails.sales_ref?.first_name || ''} ${selectedLoadDetails.sales_ref?.last_name || ''}`.trim(),
+      selectedLoadDetails.route?.name || '',
+      Number(selectedLoadDetails.total_weight).toFixed(2),
+    ];
+
+    const rows = selectedLoadItems.length > 0
+      ? selectedLoadItems.map((item) => [
+          ...common,
+          item.product_code,
+          item.name,
+          item.type,
+          Number(item.qty).toFixed(2),
+          Number(item.sell_price).toFixed(2),
+          selectedLoadDetails.notes || '',
+        ])
+      : [[...common, '', '', '', '', '', selectedLoadDetails.notes || '']];
+
+    const csvContent = [header, ...rows]
+      .map((row) => row.map((cell) => escapeCsv(String(cell))).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${selectedLoadDetails.load_number}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const getStatusColor = (status: string) => {
@@ -338,6 +535,12 @@ export default function LoadsPage() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <button
+                      onClick={() => handleViewDetails(load.id)}
+                      className="text-green-600 hover:text-green-900 mr-4"
+                    >
+                      View
+                    </button>
+                    <button
                       onClick={() => handleEdit(load)}
                       className="text-indigo-600 hover:text-indigo-900 mr-4"
                     >
@@ -356,6 +559,146 @@ export default function LoadsPage() {
           </table>
         </div>
       </div>
+
+      {showDetailsModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-16 mx-auto p-5 border w-full max-w-6xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+            <div className="mt-3">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold text-gray-900">Vehicle Load Details</h3>
+                <button
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    setSelectedLoadDetails(null);
+                    setSelectedLoadItems([]);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+
+              {detailsLoading ? (
+                <div className="py-12 text-center text-gray-600">Loading details...</div>
+              ) : !selectedLoadDetails ? (
+                <div className="py-12 text-center text-gray-600">No details found.</div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Load Number</p>
+                      <p className="text-sm font-semibold text-gray-900">{selectedLoadDetails.load_number}</p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Status</p>
+                      <p className="text-sm font-semibold text-gray-900">{selectedLoadDetails.status.replace('_', ' ')}</p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Load Date</p>
+                      <p className="text-sm font-semibold text-gray-900">{new Date(selectedLoadDetails.load_date).toLocaleDateString()}</p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Delivery Date</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {selectedLoadDetails.delivery_date ? new Date(selectedLoadDetails.delivery_date).toLocaleDateString() : '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Vehicle</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {selectedLoadDetails.vehicle?.registration_number || '-'} ({selectedLoadDetails.vehicle?.type || '-'})
+                      </p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Driver</p>
+                      <p className="text-sm font-semibold text-gray-900">{selectedLoadDetails.driver?.name || '-'}</p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Sales Ref</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {selectedLoadDetails.sales_ref?.name || `${selectedLoadDetails.sales_ref?.first_name || ''} ${selectedLoadDetails.sales_ref?.last_name || ''}`.trim() || '-'}
+                      </p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Route</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {selectedLoadDetails.route?.name || '-'} ({selectedLoadDetails.route?.origin || '-'} → {selectedLoadDetails.route?.destination || '-'})
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Total Weight</p>
+                      <p className="text-sm font-semibold text-gray-900">{Number(selectedLoadDetails.total_weight).toFixed(2)} kg</p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-xs text-gray-500 uppercase">Total Items</p>
+                      <p className="text-sm font-semibold text-gray-900">{selectedLoadItems.length}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase mb-1">Notes</p>
+                    <p className="text-sm text-gray-800">{selectedLoadDetails.notes || '-'}</p>
+                  </div>
+
+                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product Code</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sell Price</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {selectedLoadItems.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500">No load items found.</td>
+                          </tr>
+                        ) : (
+                          selectedLoadItems.map((item) => (
+                            <tr key={item.id}>
+                              <td className="px-4 py-2 text-sm text-gray-700">{item.product_code}</td>
+                              <td className="px-4 py-2 text-sm text-gray-700">{item.name}</td>
+                              <td className="px-4 py-2 text-sm text-gray-700">{item.type.replace('_', ' ')}</td>
+                              <td className="px-4 py-2 text-sm text-gray-700 text-right">{Number(item.qty).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-sm text-gray-700 text-right">{Number(item.sell_price).toFixed(2)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={handlePrintDetails}
+                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      Print
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadDetails}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      Download CSV
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal */}
       {showModal && (
@@ -455,6 +798,24 @@ export default function LoadsPage() {
                         {Array.isArray(routes) && routes.map((route) => (
                           <option key={route.id} value={route.id.toString()}>
                             {route.name} - {route.origin} to {route.destination}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Sales Ref</label>
+                      <select
+                        value={formData.sales_ref_id}
+                        onChange={(e) => setFormData({ ...formData, sales_ref_id: e.target.value })}
+                        className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      >
+                        <option value="">Select Sales Ref</option>
+                        {Array.isArray(salesRefs) && salesRefs.map((salesRef) => (
+                          <option key={salesRef.id} value={salesRef.id.toString()}>
+                            {salesRef.employee_code} - {salesRef.first_name} {salesRef.last_name}
                           </option>
                         ))}
                       </select>
