@@ -24,14 +24,17 @@ interface InvoiceItem {
   unit: string | null;
   quantity: number;
   unit_price: number;
+  discount?: number;
 }
 
 interface InvoiceRecord {
   id: number;
   invoice_number: string;
   customer_id: number;
+  load_id?: number | null;
   customer?: { shop_name: string; customer_code?: string };
   invoice_date: string;
+  due_date?: string | null;
   subtotal?: number;
   discount?: number;
   total: number;
@@ -66,6 +69,7 @@ interface PendingOfflineInvoice {
   id: string;
   createdAt: string;
   payload: {
+    load_id: number | null;
     invoice_number: string;
     customer_id: number;
     invoice_date: string;
@@ -79,6 +83,7 @@ interface PendingOfflineInvoice {
       unit: string | null;
       quantity: number;
       unit_price: number;
+      discount?: number;
     }[];
     payment?: {
       amount: number;
@@ -104,10 +109,18 @@ interface PendingOfflineInvoice {
   };
 }
 
+interface LoadOption {
+  id: number;
+  load_number?: string;
+  load_date?: string;
+  status?: string;
+}
+
 const OFFLINE_INVOICE_STORAGE_KEY = 'distribution_offline_invoices';
 
 export default function DistributionInvoicesPage() {
   const [token, setToken] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [assignedRouteId, setAssignedRouteId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -159,6 +172,11 @@ export default function DistributionInvoicesPage() {
   const [paymentBankName, setPaymentBankName] = useState('');
 
   const [activeLoadId, setActiveLoadId] = useState('');
+  const [availableLoads, setAvailableLoads] = useState<LoadOption[]>([]);
+  const [selectedLoadFilter, setSelectedLoadFilter] = useState('');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceDateFilter, setInvoiceDateFilter] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
   const [loadItems, setLoadItems] = useState<LoadItemInfo[]>([]);
   const [inlineReturnMode, setInlineReturnMode] = useState<'deduct' | 'exchange'>('deduct');
 
@@ -177,6 +195,8 @@ export default function DistributionInvoicesPage() {
   const [viewInvoice, setViewInvoice] = useState<InvoiceRecord | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
+
+  const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
 
   const router = useRouter();
 
@@ -238,10 +258,6 @@ export default function DistributionInvoicesPage() {
       localStorage.setItem('distribution_active_load_id', loadFromQuery);
     }
 
-    if (routeFromQuery || loadFromQuery) {
-      return;
-    }
-
     const cachedRouteId = localStorage.getItem('distribution_assigned_route_id');
     const cachedLoadId = localStorage.getItem('distribution_active_load_id');
     if (cachedRouteId) {
@@ -257,13 +273,44 @@ export default function DistributionInvoicesPage() {
       });
 
       const employeeId = Number(userRes.data?.employee_id || userRes.data?.employee?.id || 0);
-      if (!employeeId) return;
+      const userData = userRes.data || {};
+      const roleNames = [
+        String(userData?.role || ''),
+        ...(Array.isArray(userData?.roles) ? userData.roles.map((r: any) => String(r?.name || r || '')) : []),
+      ].join(' ').toLowerCase();
+      const adminUser = !employeeId || roleNames.includes('super admin') || roleNames.includes('admin');
+      setIsAdmin(adminUser);
 
       const loadsRes = await axios.get('http://localhost:8000/api/vehicle-loading/loads', {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       const loads = Array.isArray(loadsRes.data) ? loadsRes.data : (loadsRes.data?.data || []);
+      const mappedLoads: LoadOption[] = loads.map((load: any) => ({
+        id: Number(load.id),
+        load_number: String(load.load_number || ''),
+        load_date: String(load.load_date || ''),
+        status: String(load.status || ''),
+      }));
+      setAvailableLoads(mappedLoads);
+
+      if (adminUser) {
+        const cachedAdminLoadFilter = localStorage.getItem('distribution_admin_invoice_load_filter') || '';
+        const adminLoad = loadFromQuery || cachedAdminLoadFilter;
+        setAssignedRouteId('');
+        setActiveLoadId('');
+        if (adminLoad) {
+          setSelectedLoadFilter(adminLoad);
+        }
+        return;
+      }
+
+      if (routeFromQuery || loadFromQuery) {
+        return;
+      }
+
+      if (!employeeId) return;
+
       const assignedLoad = loads
         .filter((load: any) => Number(load.sales_ref_id) === employeeId && ['pending', 'in_transit'].includes(load.status))
         .sort((a: any, b: any) => new Date(b.load_date || b.created_at || 0).getTime() - new Date(a.load_date || a.created_at || 0).getTime())[0];
@@ -284,10 +331,21 @@ export default function DistributionInvoicesPage() {
     }
   };
 
-  const generateInvoiceNumber = () => `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
+  useEffect(() => {
+    if (!isAdmin) return;
+    localStorage.setItem('distribution_admin_invoice_load_filter', selectedLoadFilter || '');
+  }, [isAdmin, selectedLoadFilter]);
 
-    const generatePaymentNumber = () => `PAY-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
-    const generateReturnNumber = () => `RET-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
+  const formatLoadDate = (value?: string) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString();
+  };
+
+  const generateInvoiceNumber = () => `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
+  const generatePaymentNumber = () => `PAY-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
+  const generateReturnNumber = () => `RET-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
 
   const syncOfflineInvoices = async () => {
     if (!token || syncingOfflineInvoices || pendingOfflineInvoices.length === 0) return;
@@ -300,6 +358,7 @@ export default function DistributionInvoicesPage() {
         const inv = entry.payload;
         try {
           const invoiceRes = await axios.post('http://localhost:8000/api/distribution/invoices', {
+            load_id: inv.load_id ?? (activeLoadId ? Number(activeLoadId) : null),
             invoice_number: inv.invoice_number,
             customer_id: inv.customer_id,
             invoice_date: inv.invoice_date,
@@ -708,27 +767,78 @@ export default function DistributionInvoicesPage() {
   }, [customers, assignedRouteId]);
 
   const scopedCustomerIdSet = useMemo(() => new Set(scopedCustomers.map((customer) => customer.id)), [scopedCustomers]);
+  const customerNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    customers.forEach((customer) => {
+      map.set(customer.id, String(customer.shop_name || ''));
+    });
+    return map;
+  }, [customers]);
+
   const scopedInvoices = useMemo(() => {
     if (!assignedRouteId) return invoices;
     return invoices.filter((invoice) => scopedCustomerIdSet.has(invoice.customer_id));
   }, [invoices, scopedCustomerIdSet, assignedRouteId]);
 
+  const filteredInvoices = useMemo(() => {
+    const searchTerm = invoiceSearch.trim().toLowerCase();
+    const customerTerm = customerSearch.trim().toLowerCase();
+
+    return scopedInvoices.filter((invoice) => {
+      if (isAdmin && selectedLoadFilter && String(invoice.load_id || '') !== selectedLoadFilter) {
+        return false;
+      }
+
+      if (invoiceDateFilter) {
+        const invoiceDateValue = String(invoice.invoice_date || '').slice(0, 10);
+        if (invoiceDateValue !== invoiceDateFilter) return false;
+      }
+
+      if (searchTerm) {
+        const invoiceNumber = String(invoice.invoice_number || '').toLowerCase();
+        const invoiceIdText = String(invoice.id || '').toLowerCase();
+        if (!invoiceNumber.includes(searchTerm) && !invoiceIdText.includes(searchTerm)) {
+          return false;
+        }
+      }
+
+      if (customerTerm) {
+        const customerName = String(
+          invoice.customer?.shop_name || customerNameById.get(invoice.customer_id) || ''
+        ).toLowerCase();
+        if (!customerName.includes(customerTerm)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [
+    scopedInvoices,
+    isAdmin,
+    selectedLoadFilter,
+    invoiceDateFilter,
+    invoiceSearch,
+    customerSearch,
+    customerNameById,
+  ]);
+
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(scopedInvoices.length / pageSize)),
-    [scopedInvoices.length, pageSize]
+    () => Math.max(1, Math.ceil(filteredInvoices.length / pageSize)),
+    [filteredInvoices.length, pageSize]
   );
 
   const pagedInvoices = useMemo(
     () => {
       const start = (currentPage - 1) * pageSize;
-      return scopedInvoices.slice(start, start + pageSize);
+      return filteredInvoices.slice(start, start + pageSize);
     },
-    [scopedInvoices, currentPage, pageSize]
+    [filteredInvoices, currentPage, pageSize]
   );
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [scopedInvoices.length]);
+  }, [filteredInvoices.length]);
 
   const filteredItems = useMemo(() => {
     const search = itemSearch.trim().toLowerCase();
@@ -829,7 +939,87 @@ export default function DistributionInvoicesPage() {
     setViewInvoice(invoice);
   };
 
+  const startEditInvoice = (invoice: InvoiceRecord) => {
+    setEditingInvoiceId(invoice.id);
+
+    setInvoiceNumber(invoice.invoice_number);
+    setCustomerId(String(invoice.customer_id));
+
+    const rawInvoiceDate = invoice.invoice_date || '';
+    setInvoiceDate(rawInvoiceDate.length >= 10 ? rawInvoiceDate.substring(0, 10) : rawInvoiceDate);
+
+    const rawDueDate = (invoice as any).due_date || '';
+    setDueDate(rawDueDate && rawDueDate.length >= 10 ? rawDueDate.substring(0, 10) : '');
+
+    setNotes(invoice.notes || '');
+
+    const existingDiscount = typeof invoice.discount === 'number' ? invoice.discount : 0;
+    setDiscountType('amount');
+    setDiscountValue(existingDiscount.toString());
+
+    setReturnSearch('');
+    setShowReturnSuggestions(false);
+    setReturnSelectedItemId('');
+    setReturnQtyInput('');
+    setReturnLines([]);
+    setInlineReturnMode('deduct');
+
+    setAddPayment(false);
+    setPaymentMethod('cash');
+    setPaymentAmount('');
+    setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentReference('');
+    setPaymentBankName('');
+
+    const mappedLines: InvoiceLine[] = (invoice.items || []).map((it) => {
+      const qty = Number(it.quantity) || 0;
+      const unitPrice = Number(it.unit_price) || 0;
+      const itemDiscount = Number(it.discount) || 0;
+      return {
+        inventory_item_id: it.inventory_item_id ?? 0,
+        item_code: it.item_code,
+        item_name: it.item_name,
+        unit: it.unit || '',
+        quantity: qty,
+        unit_price: unitPrice,
+        base_unit_price: unitPrice + itemDiscount,
+        item_discount: itemDiscount,
+        free_quantity: 0,
+        paid_quantity: qty,
+      };
+    });
+
+    setLines(mappedLines);
+
+    setShowModal(true);
+  };
+
+  const handleDeleteInvoice = async (invoice: InvoiceRecord) => {
+    if (!token) {
+      setQtyWarningMessage('Missing authentication token. Please log in again.');
+      setQtyWarningOpen(true);
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(`Delete invoice ${invoice.invoice_number}? This cannot be undone.`);
+      if (!confirmed) return;
+    }
+
+    try {
+      await axios.delete(`http://localhost:8000/api/distribution/invoices/${invoice.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      await fetchData();
+    } catch (error: any) {
+      setQtyWarningMessage(error?.response?.data?.message || 'Failed to delete invoice');
+      setQtyWarningOpen(true);
+    }
+  };
+
   const openCreate = () => {
+    setEditingInvoiceId(null);
     resetInvoiceForm();
     if (assignedRouteId && scopedCustomers.length === 1) {
       setCustomerId(String(scopedCustomers[0].id));
@@ -926,6 +1116,7 @@ export default function DistributionInvoicesPage() {
             ...baseItem,
             quantity: paidQty,
             unit_price: line.unit_price,
+            discount: line.item_discount || 0,
           });
         }
 
@@ -934,12 +1125,14 @@ export default function DistributionInvoicesPage() {
             ...baseItem,
             quantity: freeQty,
             unit_price: 0,
+            discount: 0,
           });
         }
       return result;
     });
 
     const baseInvoicePayload = {
+      load_id: activeLoadId ? Number(activeLoadId) : null,
       invoice_number: invoiceNumber,
       customer_id: Number(customerId),
       invoice_date: invoiceDate,
@@ -1019,6 +1212,7 @@ export default function DistributionInvoicesPage() {
           unit: it.unit,
           quantity: it.quantity,
           unit_price: it.unit_price,
+          discount: Number(it.discount || 0),
         })),
         notes: composedNotes,
       };
@@ -1032,7 +1226,9 @@ export default function DistributionInvoicesPage() {
       setQtyWarningOpen(true);
     };
 
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const isEditing = editingInvoiceId !== null;
+
+    if (!isEditing && typeof navigator !== 'undefined' && !navigator.onLine) {
       queueOfflineAndFinish();
       return;
     }
@@ -1040,25 +1236,43 @@ export default function DistributionInvoicesPage() {
     try {
       setSaving(true);
 
-      const invoiceRes = await axios.post('http://localhost:8000/api/distribution/invoices', {
-        ...baseInvoicePayload,
-      }, { headers: { Authorization: `Bearer ${token}` } });
+      let savedInvoice: any = null;
 
-      const createdInvoice: any = invoiceRes.data?.data;
+      if (isEditing) {
+        const updateRes = await axios.put(
+          `http://localhost:8000/api/distribution/invoices/${editingInvoiceId}`,
+          {
+            customer_id: Number(customerId),
+            invoice_date: invoiceDate,
+            due_date: dueDate || null,
+            discount: payloadDiscount,
+            status: undefined,
+            notes: composedNotes,
+            items: itemsPayload,
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        savedInvoice = updateRes.data?.data;
+      } else {
+        const invoiceRes = await axios.post('http://localhost:8000/api/distribution/invoices', {
+          ...baseInvoicePayload,
+        }, { headers: { Authorization: `Bearer ${token}` } });
+        savedInvoice = invoiceRes.data?.data;
+      }
 
-      if (paymentPayload && createdInvoice?.id) {
+      if (paymentPayload && savedInvoice?.id) {
         try {
           await axios.post('http://localhost:8000/api/distribution/payments', {
             payment_number: generatePaymentNumber(),
-            distribution_invoice_id: createdInvoice.id,
-            customer_id: createdInvoice.customer_id ?? Number(customerId),
+            distribution_invoice_id: savedInvoice.id,
+            customer_id: savedInvoice.customer_id ?? Number(customerId),
             payment_date: paymentPayload.date,
             amount: paymentPayload.amount,
             payment_method: paymentPayload.method,
             reference_no: paymentPayload.reference || null,
             bank_name: paymentPayload.bank_name || null,
             status: 'received',
-            notes: `Auto payment from invoice ${createdInvoice.invoice_number}`,
+            notes: `Auto payment from invoice ${savedInvoice.invoice_number}`,
           }, { headers: { Authorization: `Bearer ${token}` } });
         } catch (paymentError: any) {
           console.error('Failed to record payment for invoice:', paymentError);
@@ -1067,13 +1281,13 @@ export default function DistributionInvoicesPage() {
         }
       }
 
-      if (returnLines.length > 0 && createdInvoice?.id) {
+      if (returnLines.length > 0 && savedInvoice?.id) {
         try {
           const totalReturnQty = returnLines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
           await axios.post('http://localhost:8000/api/distribution/returns', {
             return_number: generateReturnNumber(),
-            distribution_invoice_id: createdInvoice.id,
-            customer_id: createdInvoice.customer_id ?? Number(customerId),
+            distribution_invoice_id: savedInvoice.id,
+            customer_id: savedInvoice.customer_id ?? Number(customerId),
             returned_inventory_item_id: null,
             return_date: invoiceDate,
             total_quantity: totalReturnQty,
@@ -1092,19 +1306,20 @@ export default function DistributionInvoicesPage() {
       }
 
       setShowModal(false);
+      setEditingInvoiceId(null);
       resetInvoiceForm();
 
       await fetchData();
 
-      if (createdInvoice) {
-        handlePosPrint(createdInvoice as InvoiceRecord);
+      if (!isEditing && savedInvoice) {
+        handlePosPrint(savedInvoice as InvoiceRecord);
       }
     } catch (error: any) {
-      if (!error?.response) {
-        // Network / connectivity issue -> queue for offline sync
+      if (!isEditing && !error?.response) {
+        // Network / connectivity issue on create -> queue for offline sync
         queueOfflineAndFinish();
       } else {
-        setQtyWarningMessage(error?.response?.data?.message || 'Failed to create invoice');
+        setQtyWarningMessage(error?.response?.data?.message || (isEditing ? 'Failed to update invoice' : 'Failed to create invoice'));
         setQtyWarningOpen(true);
       }
     } finally {
@@ -1309,6 +1524,80 @@ export default function DistributionInvoicesPage() {
           </div>
         </div>
 
+        <div className="mb-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-gray-800">Advanced Search</h3>
+            <button
+              type="button"
+              onClick={() => {
+                setInvoiceSearch('');
+                setInvoiceDateFilter('');
+                setCustomerSearch('');
+                if (isAdmin) setSelectedLoadFilter('');
+              }}
+              className="text-xs text-gray-600 hover:text-gray-800 underline"
+            >
+              Clear Filters
+            </button>
+          </div>
+
+          <div className={`grid grid-cols-1 gap-3 sm:gap-4 items-end ${isAdmin ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Invoice ID / Number</label>
+              <input
+                type="text"
+                value={invoiceSearch}
+                onChange={(e) => setInvoiceSearch(e.target.value)}
+                placeholder="e.g. 1024 or INV-202603"
+                className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Invoice Date</label>
+              <input
+                type="date"
+                value={invoiceDateFilter}
+                onChange={(e) => setInvoiceDateFilter(e.target.value)}
+                className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Customer Name</label>
+              <input
+                type="text"
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+                placeholder="Type customer shop name"
+                className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+              />
+            </div>
+
+            {isAdmin && (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Filter By Load</label>
+                <select
+                  value={selectedLoadFilter}
+                  onChange={(e) => setSelectedLoadFilter(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                >
+                  <option value="">All Loads</option>
+                  {availableLoads.map((load) => (
+                    <option key={load.id} value={String(load.id)}>
+                      {load.load_number || `Load #${load.id}`} {load.load_date ? `(${formatLoadDate(load.load_date)})` : ''} {load.status ? `- ${load.status}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-2 text-xs text-gray-500">
+            Showing {filteredInvoices.length} invoice(s)
+          </div>
+        </div>
+
         <div className="bg-white shadow-sm rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -1323,7 +1612,7 @@ export default function DistributionInvoicesPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {scopedInvoices.length === 0 ? (
+                {filteredInvoices.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-6 py-10 text-center text-sm text-gray-500">No invoices yet.</td>
                   </tr>
@@ -1338,6 +1627,12 @@ export default function DistributionInvoicesPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                         <div className="flex justify-end gap-2">
                           <button
+                            onClick={() => startEditInvoice(invoice)}
+                            className="text-green-700 hover:text-green-900 bg-green-50 hover:bg-green-100 px-3 py-1 rounded-md text-sm font-medium border border-green-200"
+                          >
+                            Edit
+                          </button>
+                          <button
                             onClick={() => openViewInvoice(invoice)}
                             className="text-gray-700 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 px-3 py-1 rounded-md text-sm font-medium border border-gray-200"
                           >
@@ -1349,6 +1644,12 @@ export default function DistributionInvoicesPage() {
                           >
                             POS Print
                           </button>
+                          <button
+                            onClick={() => handleDeleteInvoice(invoice)}
+                            className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-1 rounded-md text-sm font-medium border border-red-200"
+                          >
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1359,7 +1660,7 @@ export default function DistributionInvoicesPage() {
           </div>
 
           <div className="md:hidden divide-y divide-gray-200">
-            {scopedInvoices.length === 0 ? (
+            {filteredInvoices.length === 0 ? (
               <div className="px-6 py-10 text-center text-sm text-gray-500">No invoices yet.</div>
             ) : pagedInvoices.map((invoice) => (
               <div key={invoice.id} className="p-4 space-y-2">
@@ -1372,6 +1673,12 @@ export default function DistributionInvoicesPage() {
                 <p className="text-sm font-medium text-gray-900">Total: {Number(invoice.total).toFixed(2)}</p>
                 <div className="pt-1 flex flex-col sm:flex-row gap-2">
                   <button
+                    onClick={() => startEditInvoice(invoice)}
+                    className="flex-1 text-green-700 hover:text-green-900 bg-green-50 hover:bg-green-100 px-3 py-2 rounded-md text-sm font-medium border border-green-200"
+                  >
+                    Edit
+                  </button>
+                  <button
                     onClick={() => openViewInvoice(invoice)}
                     className="flex-1 text-gray-700 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 px-3 py-2 rounded-md text-sm font-medium border border-gray-200"
                   >
@@ -1383,18 +1690,24 @@ export default function DistributionInvoicesPage() {
                   >
                     POS Print
                   </button>
+                  <button
+                    onClick={() => handleDeleteInvoice(invoice)}
+                    className="flex-1 text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-md text-sm font-medium border border-red-200"
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
             ))}
           </div>
 
-          {scopedInvoices.length > 0 && (
+          {filteredInvoices.length > 0 && (
             <div className="px-4 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-600">
               <div>
                 {(() => {
                   const start = (currentPage - 1) * pageSize + 1;
-                  const end = Math.min(scopedInvoices.length, currentPage * pageSize);
-                  return `Showing ${start}–${end} of ${scopedInvoices.length} invoices`;
+                  const end = Math.min(filteredInvoices.length, currentPage * pageSize);
+                  return `Showing ${start}–${end} of ${filteredInvoices.length} invoices`;
                 })()}
               </div>
               <div className="inline-flex items-center gap-2">

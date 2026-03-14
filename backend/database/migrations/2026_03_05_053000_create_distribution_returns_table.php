@@ -11,6 +11,7 @@ return new class extends Migration {
             $table->id();
             $table->string('return_number', 60)->unique();
             $table->foreignId('distribution_invoice_id')->nullable()->constrained('distribution_invoices')->nullOnDelete();
+            $table->foreignId('load_id')->nullable()->constrained('loads')->nullOnDelete();
             $table->foreignId('customer_id')->constrained('distribution_customers')->cascadeOnDelete();
             $table->date('return_date');
             $table->decimal('total_quantity', 12, 2)->default(0);

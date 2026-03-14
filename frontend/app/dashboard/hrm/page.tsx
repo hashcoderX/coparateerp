@@ -7,6 +7,10 @@ import axios from 'axios';
 
 export default function HRM() {
   const [token, setToken] = useState('');
+  const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [userPermissions, setUserPermissions] = useState<string[]>([]);
+  const [isAdminUser, setIsAdminUser] = useState(false);
+  const [accessReady, setAccessReady] = useState(false);
   const [activeEmployees, setActiveEmployees] = useState(0);
   const [attendanceRate, setAttendanceRate] = useState(0);
   const [departmentsCount, setDepartmentsCount] = useState(0);
@@ -31,9 +35,59 @@ export default function HRM() {
 
   useEffect(() => {
     if (token) {
+      fetchAccessProfile();
       fetchDashboardData();
     }
   }, [token]);
+
+  const fetchAccessProfile = async () => {
+    try {
+      const userRes = await axios.get('http://localhost:8000/api/user', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const userData = userRes.data || {};
+      const employeeId = Number(userData?.employee_id || userData?.employee?.id || 0);
+
+      const roleNames = [
+        String(userData?.role || ''),
+        ...(Array.isArray(userData?.roles)
+          ? userData.roles.map((role: any) => String(role?.name || role || ''))
+          : []),
+      ]
+        .map((role) => role.trim().toLowerCase())
+        .filter(Boolean);
+
+      const permissionNames = Array.isArray(userData?.roles)
+        ? userData.roles.flatMap((role: any) =>
+            Array.isArray(role?.permissions)
+              ? role.permissions.map((permission: any) =>
+                  String(permission?.name || '').trim().toLowerCase()
+                )
+              : []
+          )
+        : [];
+
+      const roleBlob = roleNames.join(' ');
+      const adminUser =
+        !employeeId ||
+        roleBlob.includes('super admin') ||
+        roleBlob.includes('superadmin') ||
+        roleBlob.includes('administrator') ||
+        roleBlob.includes('admin');
+
+      setUserRoles(Array.from(new Set(roleNames)));
+      setUserPermissions(Array.from(new Set(permissionNames.filter(Boolean))));
+      setIsAdminUser(adminUser);
+    } catch (error) {
+      console.error('Error fetching HRM access profile:', error);
+      setUserRoles([]);
+      setUserPermissions([]);
+      setIsAdminUser(false);
+    } finally {
+      setAccessReady(true);
+    }
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -135,6 +189,11 @@ export default function HRM() {
     }
   };
 
+  const hasAnyPermission = (keywords: string[]) => {
+    if (isAdminUser) return true;
+    return userPermissions.some((permission) => keywords.some((keyword) => permission.includes(keyword)));
+  };
+
   const hrmModules = [
     {
       name: 'Employees',
@@ -143,7 +202,8 @@ export default function HRM() {
       description: 'Manage employee records',
       color: 'from-blue-500 to-cyan-500',
       bgColor: 'from-blue-50 to-cyan-50',
-      getStats: () => loading ? '...' : `${totalEmployees} Employees`
+      getStats: () => loading ? '...' : `${totalEmployees} Employees`,
+      accessKeywords: ['view_employees', 'create_employees', 'edit_employees', 'delete_employees']
     },
     {
       name: 'Departments',
@@ -152,7 +212,8 @@ export default function HRM() {
       description: 'Manage company departments',
       color: 'from-green-500 to-emerald-500',
       bgColor: 'from-green-50 to-emerald-50',
-      getStats: () => loading ? '...' : `${departmentsCount} Departments`
+      getStats: () => loading ? '...' : `${departmentsCount} Departments`,
+      accessKeywords: ['view_departments', 'create_departments', 'edit_departments', 'delete_departments']
     },
     {
       name: 'Designations',
@@ -161,7 +222,8 @@ export default function HRM() {
       description: 'Manage job positions',
       color: 'from-purple-500 to-indigo-500',
       bgColor: 'from-purple-50 to-indigo-50',
-      getStats: () => loading ? '...' : `${designationsCount} Positions`
+      getStats: () => loading ? '...' : `${designationsCount} Positions`,
+      accessKeywords: ['view_designations', 'create_designations', 'edit_designations', 'delete_designations']
     },
     {
       name: 'Attendance',
@@ -170,7 +232,8 @@ export default function HRM() {
       description: 'Track employee attendance',
       color: 'from-orange-500 to-red-500',
       bgColor: 'from-orange-50 to-red-50',
-      getStats: () => loading ? '...' : `${todayAttendance} Marked Today`
+      getStats: () => loading ? '...' : `${todayAttendance} Marked Today`,
+      accessKeywords: ['view_attendance', 'create_attendance', 'edit_attendance', 'delete_attendance']
     },
     {
       name: 'Leaves',
@@ -179,7 +242,8 @@ export default function HRM() {
       description: 'Manage leave requests',
       color: 'from-teal-500 to-green-500',
       bgColor: 'from-teal-50 to-green-50',
-      getStats: () => loading ? '...' : `${pendingLeaves} Pending Requests`
+      getStats: () => loading ? '...' : `${pendingLeaves} Pending Requests`,
+      accessKeywords: ['view_leaves', 'create_leaves', 'approve_leaves', 'reject_leaves']
     },
     {
       name: 'Roles & Privileges',
@@ -188,7 +252,8 @@ export default function HRM() {
       description: 'Manage user roles and permissions',
       color: 'from-indigo-500 to-purple-500',
       bgColor: 'from-indigo-50 to-purple-50',
-      getStats: () => loading ? '...' : 'Access Control'
+      getStats: () => loading ? '...' : 'Access Control',
+      accessKeywords: ['view_roles', 'create_roles', 'edit_roles', 'delete_roles', 'assign_roles', 'view_permissions', 'create_permissions', 'edit_permissions', 'delete_permissions']
     },
     {
       name: 'Payroll',
@@ -197,16 +262,28 @@ export default function HRM() {
       description: 'Process payroll and salaries',
       color: 'from-yellow-500 to-orange-500',
       bgColor: 'from-yellow-50 to-orange-50',
-      getStats: () => loading ? '...' : `${pendingPayrolls} Pending`
+      getStats: () => loading ? '...' : `${pendingPayrolls} Pending`,
+      accessKeywords: ['view_payrolls', 'create_payrolls', 'edit_payrolls', 'delete_payrolls']
     },
   ];
+
+  const isSalesRefOnly =
+    !isAdminUser && userRoles.length > 0 && userRoles.every((role) => role === 'sales ref');
+
+  const visibleHrmModules = hrmModules.filter((module) => {
+    if (isAdminUser) return true;
+    if (isSalesRefOnly) {
+      return module.name === 'Leaves';
+    }
+    return hasAnyPermission(module.accessKeywords);
+  });
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     router.push('/');
   };
 
-  if (!token) {
+  if (!token || !accessReady) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-cyan-50 to-teal-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -296,7 +373,7 @@ export default function HRM() {
 
         {/* HRM Module Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {hrmModules.map((module, index) => (
+          {visibleHrmModules.map((module, index) => (
             <Link
               key={index}
               href={module.path}
@@ -337,6 +414,12 @@ export default function HRM() {
             </Link>
           ))}
         </div>
+
+        {visibleHrmModules.length === 0 && (
+          <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            No HRM features are assigned to your role yet. Please contact an administrator.
+          </div>
+        )}
 
         {/* Quick Actions Section */}
         <div className="mt-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">

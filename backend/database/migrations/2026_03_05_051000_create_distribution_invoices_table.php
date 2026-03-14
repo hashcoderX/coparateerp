@@ -11,6 +11,7 @@ return new class extends Migration {
             $table->id();
             $table->string('invoice_number', 60)->unique();
             $table->foreignId('customer_id')->constrained('distribution_customers')->cascadeOnDelete();
+            $table->foreignId('load_id')->nullable()->constrained('loads')->nullOnDelete();
             $table->date('invoice_date');
             $table->date('due_date')->nullable();
             $table->decimal('subtotal', 12, 2)->default(0);

@@ -21,6 +21,7 @@ class RoleController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255|unique:roles',
             'description' => 'nullable|string|max:500',
+            'is_active' => 'sometimes|boolean',
             'permissions' => 'array',
             'permissions.*' => 'exists:permissions,id'
         ]);
@@ -32,6 +33,7 @@ class RoleController extends Controller
         $role = Role::create([
             'name' => $request->name,
             'description' => $request->description,
+            'is_active' => $request->has('is_active') ? (bool)$request->is_active : true,
         ]);
 
         if ($request->has('permissions')) {
@@ -51,6 +53,7 @@ class RoleController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255|unique:roles,name,' . $role->id,
             'description' => 'nullable|string|max:500',
+            'is_active' => 'sometimes|boolean',
             'permissions' => 'array',
             'permissions.*' => 'exists:permissions,id'
         ]);
@@ -62,6 +65,7 @@ class RoleController extends Controller
         $role->update([
             'name' => $request->name,
             'description' => $request->description,
+            'is_active' => $request->has('is_active') ? (bool)$request->is_active : $role->is_active,
         ]);
 
         if ($request->has('permissions')) {
@@ -69,6 +73,25 @@ class RoleController extends Controller
         }
 
         return response()->json($role->load('permissions'));
+    }
+
+    public function updatePermissions(Request $request, Role $role): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'permissions' => 'required|array',
+            'permissions.*' => 'exists:permissions,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $role->permissions()->sync($request->permissions);
+
+        return response()->json([
+            'message' => 'Permissions updated successfully',
+            'role' => $role->load('permissions')
+        ]);
     }
 
     public function destroy(Role $role): JsonResponse
@@ -94,7 +117,17 @@ class RoleController extends Controller
         }
 
         $user = \App\Models\User::find($request->user_id);
-        $user->roles()->attach($request->role_id);
+
+        if ($user->roles()->where('roles.id', $request->role_id)->exists()) {
+            return response()->json(['message' => 'Role is already assigned to this user']);
+        }
+
+        $assignedBy = $request->user()?->id ?? $request->user_id;
+
+        $user->roles()->attach($request->role_id, [
+            'assigned_at' => now(),
+            'assigned_by' => $assignedBy,
+        ]);
 
         return response()->json(['message' => 'Role assigned to user successfully']);
     }

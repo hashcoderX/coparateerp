@@ -24,7 +24,26 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/user', function (Request $request) {
-    return $request->user();
+    $user = $request->user();
+    if (!$user) {
+        return null;
+    }
+
+    $user->loadMissing(['employee', 'roles.permissions']);
+
+    // Backward compatibility: if legacy users.role exists but user_roles is empty,
+    // expose matching role with permissions in the response.
+    if ($user->roles->isEmpty() && !empty($user->role)) {
+        $legacyRole = \App\Models\Role::with('permissions')
+            ->whereRaw('LOWER(name) = ?', [strtolower((string) $user->role)])
+            ->first();
+
+        if ($legacyRole) {
+            $user->setRelation('roles', collect([$legacyRole]));
+        }
+    }
+
+    return $user;
 })->middleware('auth:sanctum');
 
 Route::get('/users', function () {
@@ -109,6 +128,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Role and Permission Management Routes
     Route::apiResource('roles', \App\Http\Controllers\RoleController::class);
     Route::apiResource('permissions', \App\Http\Controllers\PermissionController::class);
+    Route::put('roles/{role}/permissions', [\App\Http\Controllers\RoleController::class, 'updatePermissions']);
     Route::post('roles/assign-to-user', [\App\Http\Controllers\RoleController::class, 'assignToUser']);
     Route::post('roles/remove-from-user', [\App\Http\Controllers\RoleController::class, 'removeFromUser']);
     Route::get('users/{userId}/roles', [\App\Http\Controllers\RoleController::class, 'getUserRoles']);
@@ -132,6 +152,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('vehicle-loading/vehicles', \App\Http\Controllers\VehicleController::class);
     Route::apiResource('vehicle-loading/routes', \App\Http\Controllers\RouteController::class);
     Route::apiResource('vehicle-loading/loads', LoadController::class);
+    Route::get('vehicle-loading/loads/{load}/delivery-summary', [LoadController::class, 'deliverySummary']);
     Route::apiResource('vehicle-loading/load-items', \App\Http\Controllers\LoadItemController::class);
     Route::post('vehicle-loading/load-items/upload-csv', [\App\Http\Controllers\LoadItemController::class, 'uploadCsv']);
 

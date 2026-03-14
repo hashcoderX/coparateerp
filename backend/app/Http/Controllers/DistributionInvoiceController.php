@@ -10,6 +10,7 @@ use App\Models\LoadItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 class DistributionInvoiceController extends Controller
@@ -64,6 +65,7 @@ class DistributionInvoiceController extends Controller
         $validator = Validator::make($request->all(), [
             'invoice_number' => 'required|string|max:60|unique:distribution_invoices,invoice_number',
             'customer_id' => 'required|exists:distribution_customers,id',
+            'load_id' => 'nullable|exists:loads,id',
             'invoice_date' => 'required|date',
             'due_date' => 'nullable|date|after_or_equal:invoice_date',
             'discount' => 'nullable|numeric|min:0',
@@ -75,6 +77,7 @@ class DistributionInvoiceController extends Controller
             'items.*.unit' => 'nullable|string|max:30',
             'items.*.quantity' => 'required|numeric|gt:0',
             'items.*.unit_price' => 'required|numeric|min:0',
+            'items.*.discount' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -89,9 +92,15 @@ class DistributionInvoiceController extends Controller
 
         $invoice = DB::transaction(function () use ($payload, $request) {
             $user = $request->user();
+            $invoiceHasLoadId = Schema::hasColumn('distribution_invoices', 'load_id');
+            $invoiceItemsHasLoadId = Schema::hasColumn('distribution_invoice_items', 'load_id');
 
             $activeLoad = null;
-            if ($user && $user->employee_id) {
+            if (!empty($payload['load_id'])) {
+                $activeLoad = Load::find($payload['load_id']);
+            }
+
+            if (!$activeLoad && $user && $user->employee_id) {
                 $activeLoad = Load::where('sales_ref_id', $user->employee_id)
                     ->whereIn('status', ['pending', 'in_transit'])
                     ->orderByDesc('load_date')
@@ -107,7 +116,7 @@ class DistributionInvoiceController extends Controller
             $discount = (float) ($payload['discount'] ?? 0);
             $total = max(0, $subtotal - $discount);
 
-            $invoice = DistributionInvoice::create([
+            $invoiceData = [
                 'invoice_number' => $payload['invoice_number'],
                 'customer_id' => $payload['customer_id'],
                 'invoice_date' => $payload['invoice_date'],
@@ -119,12 +128,18 @@ class DistributionInvoiceController extends Controller
                 'status' => 'pending',
                 'notes' => $payload['notes'] ?? null,
                 'created_by' => $request->user()?->id,
-            ]);
+            ];
+
+            if ($invoiceHasLoadId) {
+                $invoiceData['load_id'] = $activeLoad?->id;
+            }
+
+            $invoice = DistributionInvoice::create($invoiceData);
 
             foreach ($payload['items'] as $item) {
                 $lineTotal = (float) $item['quantity'] * (float) $item['unit_price'];
 
-                DistributionInvoiceItem::create([
+                $itemData = [
                     'distribution_invoice_id' => $invoice->id,
                     'inventory_item_id' => $item['inventory_item_id'] ?? null,
                     'item_code' => $item['item_code'],
@@ -132,8 +147,15 @@ class DistributionInvoiceController extends Controller
                     'unit' => $item['unit'] ?? null,
                     'quantity' => $item['quantity'],
                     'unit_price' => $item['unit_price'],
+                    'discount' => (float) ($item['discount'] ?? 0),
                     'line_total' => $lineTotal,
-                ]);
+                ];
+
+                if ($invoiceItemsHasLoadId) {
+                    $itemData['load_id'] = $activeLoad?->id;
+                }
+
+                DistributionInvoiceItem::create($itemData);
 
                 $handledByLoad = false;
 
@@ -188,7 +210,7 @@ class DistributionInvoiceController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
-        $invoice = DistributionInvoice::find($id);
+        $invoice = DistributionInvoice::with('items')->find($id);
 
         if (!$invoice) {
             return response()->json([
@@ -204,6 +226,14 @@ class DistributionInvoiceController extends Controller
             'discount' => 'nullable|numeric|min:0',
             'status' => 'nullable|in:pending,partial,paid,cancelled',
             'notes' => 'nullable|string',
+            'items' => 'required|array|min:1',
+            'items.*.inventory_item_id' => 'nullable|exists:inventory_items,id',
+            'items.*.item_code' => 'required|string|max:80',
+            'items.*.item_name' => 'required|string|max:255',
+            'items.*.unit' => 'nullable|string|max:30',
+            'items.*.quantity' => 'required|numeric|gt:0',
+            'items.*.unit_price' => 'required|numeric|min:0',
+            'items.*.discount' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -214,11 +244,53 @@ class DistributionInvoiceController extends Controller
             ], 422);
         }
 
-        $invoice->update($validator->validated());
+        $payload = $validator->validated();
+
+        $invoice = DB::transaction(function () use ($invoice, $payload) {
+            $subtotal = 0;
+            foreach ($payload['items'] as $item) {
+                $subtotal += (float) $item['quantity'] * (float) $item['unit_price'];
+            }
+
+            $discount = (float) ($payload['discount'] ?? 0);
+            $total = max(0, $subtotal - $discount);
+
+            $invoice->update([
+                'customer_id' => $payload['customer_id'],
+                'invoice_date' => $payload['invoice_date'],
+                'due_date' => $payload['due_date'] ?? null,
+                'subtotal' => $subtotal,
+                'discount' => $discount,
+                'total' => $total,
+                'status' => $payload['status'] ?? $invoice->status,
+                'notes' => $payload['notes'] ?? null,
+            ]);
+
+            // Replace invoice items without touching load or inventory stock
+            DistributionInvoiceItem::where('distribution_invoice_id', $invoice->id)->delete();
+
+            foreach ($payload['items'] as $item) {
+                $lineTotal = (float) $item['quantity'] * (float) $item['unit_price'];
+
+                DistributionInvoiceItem::create([
+                    'distribution_invoice_id' => $invoice->id,
+                    'inventory_item_id' => $item['inventory_item_id'] ?? null,
+                    'item_code' => $item['item_code'],
+                    'item_name' => $item['item_name'],
+                    'unit' => $item['unit'] ?? null,
+                    'quantity' => $item['quantity'],
+                    'unit_price' => $item['unit_price'],
+                    'discount' => (float) ($item['discount'] ?? 0),
+                    'line_total' => $lineTotal,
+                ]);
+            }
+
+            return $invoice->load(['customer:id,shop_name,customer_code', 'items']);
+        });
 
         return response()->json([
             'success' => true,
-            'data' => $invoice->load(['customer:id,shop_name,customer_code', 'items']),
+            'data' => $invoice,
             'message' => 'Distribution invoice updated successfully',
         ]);
     }

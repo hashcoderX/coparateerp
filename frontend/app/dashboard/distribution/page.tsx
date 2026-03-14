@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import axios from 'axios';
+import { isAxiosError } from 'axios';
+import { createApiClient } from '../../../lib/apiClient';
 
 interface RouteCustomer {
   id: number;
@@ -26,6 +27,8 @@ export default function DistributionPage() {
   const [routeCustomers, setRouteCustomers] = useState<RouteCustomer[]>([]);
   const [routeCustomersLoading, setRouteCustomersLoading] = useState(false);
   const router = useRouter();
+
+  const api = useMemo(() => createApiClient(token), [token]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -51,13 +54,22 @@ export default function DistributionPage() {
     }
   }, [token, assignedRouteId]);
 
+  const handleUnauthorized = (error: unknown) => {
+    if (isAxiosError(error) && error.response?.status === 401) {
+      localStorage.removeItem('token');
+      setToken('');
+      router.push('/');
+      return true;
+    }
+
+    return false;
+  };
+
   const resolveAssignedRoute = async () => {
     try {
       setRouteResolving(true);
 
-      const userRes = await axios.get('http://localhost:8000/api/user', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const userRes = await api.get('/user');
 
       const employeeId = Number(userRes.data?.employee_id || userRes.data?.employee?.id || 0);
       if (!employeeId) {
@@ -68,9 +80,7 @@ export default function DistributionPage() {
         return;
       }
 
-      const loadsRes = await axios.get('http://localhost:8000/api/vehicle-loading/loads', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const loadsRes = await api.get('/vehicle-loading/loads');
 
       const loads = Array.isArray(loadsRes.data) ? loadsRes.data : (loadsRes.data?.data || []);
       const activeAssignedLoads = loads
@@ -94,6 +104,7 @@ export default function DistributionPage() {
       localStorage.setItem('distribution_assigned_route_id', String(routeId));
       localStorage.setItem('distribution_assigned_route_name', routeName);
     } catch (error) {
+      if (handleUnauthorized(error)) return;
       console.error('Error resolving assigned route:', error);
       const cachedRouteId = localStorage.getItem('distribution_assigned_route_id');
       const cachedRouteName = localStorage.getItem('distribution_assigned_route_name') || '';
@@ -110,10 +121,10 @@ export default function DistributionPage() {
     try {
       setLoading(true);
       const [customersRes, invoicesRes, returnsRes, paymentsRes] = await Promise.all([
-        axios.get('http://localhost:8000/api/distribution/customers', { headers: { Authorization: `Bearer ${token}` }, params: { per_page: 1 } }),
-        axios.get('http://localhost:8000/api/distribution/invoices', { headers: { Authorization: `Bearer ${token}` }, params: { per_page: 1 } }),
-        axios.get('http://localhost:8000/api/distribution/returns', { headers: { Authorization: `Bearer ${token}` }, params: { per_page: 1 } }),
-        axios.get('http://localhost:8000/api/distribution/payments', { headers: { Authorization: `Bearer ${token}` }, params: { per_page: 1 } }),
+        api.get('/distribution/customers', { params: { per_page: 1 } }),
+        api.get('/distribution/invoices', { params: { per_page: 1 } }),
+        api.get('/distribution/returns', { params: { per_page: 1 } }),
+        api.get('/distribution/payments', { params: { per_page: 1 } }),
       ]);
 
       setCustomerCount(Number(customersRes.data?.data?.total) || 0);
@@ -121,6 +132,7 @@ export default function DistributionPage() {
       setReturnCount(Number(returnsRes.data?.data?.total) || 0);
       setPaymentCount(Number(paymentsRes.data?.data?.total) || 0);
     } catch (error) {
+      if (handleUnauthorized(error)) return;
       console.error('Error fetching distribution stats:', error);
       setCustomerCount(0);
       setInvoiceCount(0);
@@ -134,8 +146,7 @@ export default function DistributionPage() {
   const fetchRouteCustomers = async () => {
     try {
       setRouteCustomersLoading(true);
-      const res = await axios.get('http://localhost:8000/api/distribution/customers', {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await api.get('/distribution/customers', {
         params: { per_page: 100 },
       });
 
@@ -146,6 +157,7 @@ export default function DistributionPage() {
 
       setRouteCustomers(filtered);
     } catch (error) {
+      if (handleUnauthorized(error)) return;
       console.error('Error fetching route customers on distribution dashboard:', error);
       setRouteCustomers([]);
     } finally {

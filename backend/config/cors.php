@@ -15,11 +15,13 @@ return [
     |
     */
 
-    'paths' => ['api/*'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'],
+    // Development: allow all origins so the Next.js app on http://localhost:3000
+    // (or any local port) can access the API without CORS issues.
+    'allowed_origins' => ['*'],
 
     'allowed_origins_patterns' => [],
 
@@ -29,6 +31,6 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => true,
+    'supports_credentials' => false,
 
 ];

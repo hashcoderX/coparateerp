@@ -9,6 +9,7 @@ use App\Models\Load;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 class DistributionReturnController extends Controller
@@ -68,6 +69,7 @@ class DistributionReturnController extends Controller
         $validator = Validator::make($request->all(), [
             'return_number' => 'required|string|max:60|unique:distribution_returns,return_number',
             'distribution_invoice_id' => 'nullable|exists:distribution_invoices,id',
+            'load_id' => 'nullable|exists:loads,id',
             'customer_id' => 'required|exists:distribution_customers,id',
             'returned_inventory_item_id' => 'nullable|exists:inventory_items,id',
             'return_date' => 'required|date',
@@ -93,10 +95,23 @@ class DistributionReturnController extends Controller
         $payload = $validator->validated();
 
         $distributionReturn = DB::transaction(function () use ($payload) {
+            $returnsHasLoadId = Schema::hasColumn('distribution_returns', 'load_id');
             $settlementType = $payload['settlement_type'] ?? 'bill_deduction';
             $settlementAmount = (float) ($payload['settlement_amount'] ?? $payload['total_amount'] ?? 0);
 
-            $distributionReturn = DistributionReturn::create([
+            $loadId = null;
+            if (!empty($payload['distribution_invoice_id'])) {
+                $invoice = DistributionInvoice::find($payload['distribution_invoice_id']);
+                if ($invoice) {
+                    $loadId = $invoice->load_id;
+                }
+            }
+
+            if (!$loadId && !empty($payload['load_id'])) {
+                $loadId = $payload['load_id'];
+            }
+
+            $returnData = [
                 'return_number' => $payload['return_number'],
                 'distribution_invoice_id' => $payload['distribution_invoice_id'] ?? null,
                 'customer_id' => $payload['customer_id'],
@@ -111,7 +126,13 @@ class DistributionReturnController extends Controller
                 'reason' => $payload['reason'] ?? null,
                 'status' => $payload['status'] ?? 'pending',
                 'notes' => $payload['notes'] ?? null,
-            ]);
+            ];
+
+            if ($returnsHasLoadId) {
+                $returnData['load_id'] = $loadId;
+            }
+
+            $distributionReturn = DistributionReturn::create($returnData);
 
             if (!empty($payload['returned_inventory_item_id']) && (float) $payload['total_quantity'] > 0) {
                 $inventory = InventoryItem::find($payload['returned_inventory_item_id']);

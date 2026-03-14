@@ -10,6 +10,7 @@ class DistributionReturn extends Model
     protected $fillable = [
         'return_number',
         'distribution_invoice_id',
+        'load_id',
         'customer_id',
         'returned_inventory_item_id',
         'return_date',
@@ -50,5 +51,10 @@ class DistributionReturn extends Model
     public function exchangeItem(): BelongsTo
     {
         return $this->belongsTo(InventoryItem::class, 'exchange_inventory_item_id');
+    }
+
+    public function assignedLoad(): BelongsTo
+    {
+        return $this->belongsTo(Load::class, 'load_id');
     }
 }

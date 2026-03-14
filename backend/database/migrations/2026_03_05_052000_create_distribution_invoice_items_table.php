@@ -10,6 +10,7 @@ return new class extends Migration {
         Schema::create('distribution_invoice_items', function (Blueprint $table) {
             $table->id();
             $table->foreignId('distribution_invoice_id')->constrained('distribution_invoices')->cascadeOnDelete();
+            $table->foreignId('load_id')->nullable()->constrained('loads')->nullOnDelete();
             $table->foreignId('inventory_item_id')->nullable()->constrained('inventory_items')->nullOnDelete();
             $table->string('item_code', 80);
             $table->string('item_name');

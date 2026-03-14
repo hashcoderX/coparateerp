@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
@@ -36,6 +36,124 @@ interface UserRole {
   role: Role;
 }
 
+
+const PERMISSION_SECTION_ORDER = [
+  { key: 'distribution', label: 'Distribution' },
+  { key: 'hrm', label: 'HRM' },
+  { key: 'purchasing', label: 'Purchasing' },
+  { key: 'stock', label: 'Stock' },
+  { key: 'vehicle-loading', label: 'Vehicle Loading' },
+  { key: 'branches', label: 'Branches' },
+  { key: 'other', label: 'Other' },
+];
+
+const SECTION_FALLBACK_ACTIONS: Record<string, string[]> = {
+  distribution: [
+    'View Customers',
+    'Manage Customers',
+    'View Invoices',
+    'Create Invoices',
+    'Manage Returns',
+    'Record Payments',
+    'View Debtors',
+    'View Customer Ledger',
+  ],
+  purchasing: [
+    'View Purchase Orders',
+    'Create Purchase Orders',
+    'Manage GRN',
+  ],
+  stock: [
+    'View Inventory',
+    'Manage Inventory',
+    'Manage Transfers',
+    'Manage Suppliers',
+  ],
+  'vehicle-loading': [
+    'View Vehicles',
+    'Manage Vehicles',
+    'View Routes',
+    'Manage Routes',
+    'View Loads',
+    'Manage Loads',
+    'Manage Load Items',
+  ],
+  branches: [
+    'View Branches',
+    'Manage Branches',
+    'View Branch Stock Report',
+  ],
+};
+
+const toPermissionSlug = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+const inferPermissionSection = (permission: Permission): string => {
+  const haystack = `${permission.module || ''} ${permission.name || ''}`.toLowerCase();
+
+  if (
+    haystack.includes('distribution') ||
+    haystack.includes('customer') ||
+    haystack.includes('invoice') ||
+    haystack.includes('return') ||
+    haystack.includes('payment')
+  ) {
+    return 'distribution';
+  }
+
+  if (
+    haystack.includes('vehicle-loading') ||
+    haystack.includes('vehicle_loading') ||
+    haystack.includes('vehicle') ||
+    haystack.includes('load') ||
+    haystack.includes('route')
+  ) {
+    return 'vehicle-loading';
+  }
+
+  if (
+    haystack.includes('purchasing') ||
+    haystack.includes('purchesing') ||
+    haystack.includes('purchase') ||
+    haystack.includes('grn')
+  ) {
+    return 'purchasing';
+  }
+
+  if (
+    haystack.includes('stock') ||
+    haystack.includes('inventory') ||
+    haystack.includes('supplier') ||
+    haystack.includes('transfer')
+  ) {
+    return 'stock';
+  }
+
+  if (
+    haystack.includes('branch') ||
+    haystack.includes('outlet')
+  ) {
+    return 'branches';
+  }
+
+  if (
+    haystack.includes('hr') ||
+    haystack.includes('employee') ||
+    haystack.includes('department') ||
+    haystack.includes('designation') ||
+    haystack.includes('attendance') ||
+    haystack.includes('leave') ||
+    haystack.includes('payroll') ||
+    haystack.includes('candidate')
+  ) {
+    return 'hrm';
+  }
+
+  return 'other';
+};
 export default function Roles() {
   const [token, setToken] = useState('');
   const [roles, setRoles] = useState<Role[]>([]);
@@ -115,16 +233,171 @@ export default function Roles() {
     }
   }, [router]);
 
+  const permissionSections = useMemo(() => {
+    const buckets = new Map<string, Permission[]>();
+    PERMISSION_SECTION_ORDER.forEach((section) => {
+      buckets.set(section.key, []);
+    });
+
+    permissions
+      .filter((permission) => permission.is_active !== false)
+      .forEach((permission) => {
+        const key = inferPermissionSection(permission);
+        const existing = buckets.get(key) || [];
+        existing.push(permission);
+        buckets.set(key, existing);
+      });
+
+    return PERMISSION_SECTION_ORDER.map((section) => ({
+      ...section,
+      permissions: (buckets.get(section.key) || []).sort((a, b) => a.name.localeCompare(b.name)),
+    }));
+  }, [permissions]);
+
+  const virtualPermissions = useMemo(() => {
+    let seed = 1;
+    const generated: Permission[] = [];
+
+    permissionSections.forEach((section) => {
+      if (section.permissions.length > 0) return;
+      const fallbackActions = SECTION_FALLBACK_ACTIONS[section.key] || [];
+      fallbackActions.forEach((action) => {
+        generated.push({
+          id: -seed,
+          name: `${section.key}_${toPermissionSlug(action)}`,
+          module: section.label,
+          description: action,
+          is_active: true,
+        });
+        seed += 1;
+      });
+    });
+
+    return generated;
+  }, [permissionSections]);
+
+  const virtualPermissionById = useMemo(() => {
+    const map = new Map<number, Permission>();
+    virtualPermissions.forEach((permission) => {
+      map.set(permission.id, permission);
+    });
+    return map;
+  }, [virtualPermissions]);
+
+  const resolveSelectedPermissionIds = async () => {
+    const resolvedIds = selectedPermissions.filter((id) => id > 0);
+    const virtualIds = selectedPermissions.filter((id) => id < 0);
+    if (virtualIds.length === 0) return Array.from(new Set(resolvedIds));
+
+    const existingByName = new Map<string, Permission>();
+    permissions.forEach((permission) => {
+      existingByName.set(String(permission.name || '').toLowerCase(), permission);
+    });
+
+    for (const id of virtualIds) {
+      const virtual = virtualPermissionById.get(id);
+      if (!virtual) continue;
+
+      const existing = existingByName.get(virtual.name.toLowerCase());
+      if (existing?.id) {
+        resolvedIds.push(existing.id);
+        continue;
+      }
+
+      try {
+        const createRes = await axios.post('http://localhost:8000/api/permissions', {
+          name: virtual.name,
+          description: virtual.description,
+          module: virtual.module,
+          is_active: true,
+        }, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const created = createRes.data;
+        if (created?.id) {
+          resolvedIds.push(Number(created.id));
+          existingByName.set(virtual.name.toLowerCase(), {
+            ...virtual,
+            id: Number(created.id),
+          });
+        }
+      } catch (error) {
+        console.error(`Failed to auto-create permission: ${virtual.name}`, error);
+      }
+    }
+
+    await fetchPermissions();
+    return Array.from(new Set(resolvedIds));
+  };
+
+  const sectionActionsByKey = useMemo(() => {
+    const prettify = (value: string) => value.replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const extractAction = (permissionName: string, sectionKey: string) => {
+      const trimmed = String(permissionName || '').trim();
+      if (!trimmed) return 'Manage';
+
+      if (trimmed.includes('.')) {
+        const parts = trimmed.split('.').filter(Boolean);
+        return prettify(parts.length >= 2 ? parts[1] : parts[0]);
+      }
+
+      const sectionPrefix = `${sectionKey}_`;
+      if (trimmed.toLowerCase().startsWith(sectionPrefix.toLowerCase())) {
+        return prettify(trimmed.slice(sectionPrefix.length));
+      }
+
+      return prettify(trimmed);
+    };
+
+    const map = new Map<string, string[]>();
+    permissionSections.forEach((section) => {
+      const actions = Array.from(
+        new Set(section.permissions.map((permission) => extractAction(permission.name, section.key)))
+      ).sort((a, b) => a.localeCompare(b));
+      map.set(section.key, actions);
+    });
+    return map;
+  }, [permissionSections]);
+
+  const getDisplayActions = (sectionKey: string) => {
+    const derived = sectionActionsByKey.get(sectionKey) || [];
+    if (derived.length > 0) return derived;
+    return SECTION_FALLBACK_ACTIONS[sectionKey] || [];
+  };
+
+  const toggleSectionPermissions = (sectionKey: string) => {
+    const section = permissionSections.find((item) => item.key === sectionKey);
+    if (!section) return;
+
+    const sectionPermissionIds = section.permissions.map((permission) => permission.id);
+    const allSelected = sectionPermissionIds.every((id) => selectedPermissions.includes(id));
+
+    setSelectedPermissions((prev) => {
+      if (allSelected) {
+        return prev.filter((id) => !sectionPermissionIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...sectionPermissionIds]));
+    });
+  };
+
   const fetchRoles = async (authToken?: string) => {
     const tokenToUse = authToken || token;
     if (!tokenToUse) return;
 
     try {
-      const response = await axios.get('http://localhost:8000/api/hr/roles', {
+      const response = await axios.get('http://localhost:8000/api/roles', {
         headers: { Authorization: `Bearer ${tokenToUse}` },
         params: { per_page: 1000 }
       });
-      setRoles(response.data.data || []);
+      const rawRoles = Array.isArray(response.data) ? response.data : (response.data?.data || []);
+      setRoles(
+        rawRoles.map((role: any) => ({
+          ...role,
+          permissions: Array.isArray(role?.permissions) ? role.permissions : [],
+        }))
+      );
     } catch (error) {
       console.error('Error fetching roles:', error);
       // For demo purposes, set some sample data
@@ -165,27 +438,24 @@ export default function Roles() {
     if (!tokenToUse) return;
 
     try {
-      const response = await axios.get('http://localhost:8000/api/hr/permissions', {
+      const response = await axios.get('http://localhost:8000/api/permissions', {
         headers: { Authorization: `Bearer ${tokenToUse}` },
         params: { per_page: 1000 }
       });
-      setPermissions(response.data.data || []);
+      const rawPermissions = Array.isArray(response.data) ? response.data : (response.data?.data || []);
+      setPermissions(rawPermissions);
     } catch (error) {
       console.error('Error fetching permissions:', error);
       // For demo purposes, set some sample data
       setPermissions([
-        { id: 1, name: 'view_employees', module: 'Employees', description: 'View employee records', is_active: true },
-        { id: 2, name: 'create_employees', module: 'Employees', description: 'Create new employees', is_active: true },
-        { id: 3, name: 'edit_employees', module: 'Employees', description: 'Edit employee records', is_active: true },
-        { id: 4, name: 'delete_employees', module: 'Employees', description: 'Delete employees', is_active: true },
-        { id: 5, name: 'view_departments', module: 'Departments', description: 'View departments', is_active: true },
-        { id: 6, name: 'manage_departments', module: 'Departments', description: 'Manage departments', is_active: true },
-        { id: 7, name: 'view_attendance', module: 'Attendance', description: 'View attendance records', is_active: true },
-        { id: 8, name: 'manage_attendance', module: 'Attendance', description: 'Manage attendance', is_active: true },
-        { id: 9, name: 'view_leaves', module: 'Leaves', description: 'View leave requests', is_active: true },
-        { id: 10, name: 'manage_leaves', module: 'Leaves', description: 'Manage leave requests', is_active: true },
-        { id: 11, name: 'view_payroll', module: 'Payroll', description: 'View payroll data', is_active: true },
-        { id: 12, name: 'manage_payroll', module: 'Payroll', description: 'Manage payroll', is_active: true }
+        { id: 1, name: 'distribution.view_customers', module: 'distribution', description: 'View distribution customers', is_active: true },
+        { id: 2, name: 'distribution.manage_invoices', module: 'distribution', description: 'Create and manage invoices', is_active: true },
+        { id: 3, name: 'hrm.view_employees', module: 'hrm', description: 'View employee records', is_active: true },
+        { id: 4, name: 'hrm.manage_payroll', module: 'hrm', description: 'Manage payroll', is_active: true },
+        { id: 5, name: 'purchasing.manage_po', module: 'purchasing', description: 'Manage purchase orders', is_active: true },
+        { id: 6, name: 'stock.manage_inventory', module: 'stock', description: 'Manage inventory and transfers', is_active: true },
+        { id: 7, name: 'vehicle-loading.manage_loads', module: 'vehicle-loading', description: 'Manage routes and loads', is_active: true },
+        { id: 8, name: 'branches.manage_branches', module: 'branches', description: 'Manage branch records', is_active: true }
       ]);
     }
   };
@@ -218,20 +488,22 @@ export default function Roles() {
     e.preventDefault();
     setLoading(true);
 
+    const resolvedPermissions = await resolveSelectedPermissionIds();
+
     const roleData = {
       name: roleName,
       description: roleDescription,
-      permissions: selectedPermissions,
+      permissions: resolvedPermissions,
       is_active: isActive,
     };
 
     try {
       if (editingRole) {
-        await axios.put(`http://localhost:8000/api/hr/roles/${editingRole.id}`, roleData, {
+        await axios.put(`http://localhost:8000/api/roles/${editingRole.id}`, roleData, {
           headers: { Authorization: `Bearer ${token}` },
         });
       } else {
-        await axios.post('http://localhost:8000/api/hr/roles', roleData, {
+        await axios.post('http://localhost:8000/api/roles', roleData, {
           headers: { Authorization: `Bearer ${token}` },
         });
       }
@@ -274,7 +546,7 @@ export default function Roles() {
 
   const handleDelete = async (id: number) => {
     try {
-      await axios.delete(`http://localhost:8000/api/hr/roles/${id}`, {
+      await axios.delete(`http://localhost:8000/api/roles/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       fetchRoles();
@@ -314,8 +586,10 @@ export default function Roles() {
     if (!activeRole) return;
 
     try {
-      await axios.put(`http://localhost:8000/api/hr/roles/${activeRole.id}/permissions`, {
-        permissions: selectedPermissions
+      const resolvedPermissions = await resolveSelectedPermissionIds();
+
+      await axios.put(`http://localhost:8000/api/roles/${activeRole.id}/permissions`, {
+        permissions: resolvedPermissions
       }, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -343,7 +617,7 @@ export default function Roles() {
     if (!selectedUser || !selectedRole) return;
 
     try {
-      await axios.post('http://localhost:8000/api/hr/user-roles', {
+      await axios.post('http://localhost:8000/api/roles/assign-to-user', {
         user_id: selectedUser,
         role_id: selectedRole
       }, {
@@ -553,21 +827,73 @@ export default function Roles() {
                   <label className="block text-sm font-medium text-gray-700 mb-2 mb-3">
                     Permissions
                   </label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-48 overflow-y-auto border border-gray-200 rounded-xl p-4 bg-gray-50">
-                    {permissions.map((permission) => (
-                      <label key={permission.id} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-white transition-colors duration-200">
-                        <input
-                          type="checkbox"
-                          checked={selectedPermissions.includes(permission.id)}
-                          onChange={() => handlePermissionToggle(permission.id)}
-                          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900">{permission.name}</p>
-                          <p className="text-xs text-gray-600">{permission.description}</p>
+                  <div className="space-y-4 max-h-72 overflow-y-auto border border-gray-200 rounded-xl p-4 bg-gray-50">
+                    {permissionSections.map((section) => {
+                      const sectionPermissionIds = section.permissions.map((permission) => permission.id);
+                      const allSelected = sectionPermissionIds.length > 0 && sectionPermissionIds.every((id) => selectedPermissions.includes(id));
+                      const fallbackPermissions = section.permissions.length === 0
+                        ? virtualPermissions.filter((permission) => inferPermissionSection(permission) === section.key)
+                        : [];
+
+                      return (
+                        <div key={section.key} className="rounded-xl border border-gray-200 bg-white p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div>
+                              <p className="text-sm font-semibold text-gray-900">{section.label}</p>
+                              <p className="text-xs text-gray-500">{section.permissions.length} permission(s)</p>
+                              {getDisplayActions(section.key).length ? (
+                                <p className="text-[11px] text-gray-500 mt-0.5">
+                                  Actions: {getDisplayActions(section.key).join(', ')}
+                                </p>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => toggleSectionPermissions(section.key)}
+                              className="px-2.5 py-1 text-xs rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                            >
+                              {allSelected ? 'Clear' : 'Select All'}
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {section.permissions.map((permission) => (
+                              <label key={permission.id} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-50 transition-colors duration-200">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedPermissions.includes(permission.id)}
+                                  onChange={() => handlePermissionToggle(permission.id)}
+                                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900">{permission.name}</p>
+                                  <p className="text-xs text-gray-600">{permission.description}</p>
+                                </div>
+                              </label>
+                            ))}
+
+                            {fallbackPermissions.map((permission) => (
+                              <label key={`${section.key}-fallback-${permission.id}`} className="flex items-center space-x-3 p-2 rounded-lg bg-gray-50 border border-dashed border-gray-200">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedPermissions.includes(permission.id)}
+                                  onChange={() => handlePermissionToggle(permission.id)}
+                                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-700">{permission.description}</p>
+                                  <p className="text-xs text-gray-500">Will be created when saved</p>
+                                </div>
+                              </label>
+                            ))}
+                          </div>
                         </div>
-                      </label>
-                    ))}
+                      );
+                    })}
+
+                    {permissionSections.every((section) => section.permissions.length === 0) && (
+                      <p className="text-sm text-gray-500">No active permissions found.</p>
+                    )}
                   </div>
                 </div>
 
@@ -634,24 +960,77 @@ export default function Roles() {
             </div>
 
             <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {permissions.map((permission) => (
-                  <div key={permission.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-indigo-300 transition-colors duration-200">
-                    <div className="flex-1">
-                      <h4 className="text-sm font-medium text-gray-900">{permission.name}</h4>
-                      <p className="text-xs text-gray-600">{permission.description}</p>
-                      <span className="inline-block mt-1 px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded">{permission.module}</span>
+              <div className="space-y-4">
+                {permissionSections.map((section) => {
+                  const sectionPermissionIds = section.permissions.map((permission) => permission.id);
+                  const allSelected = sectionPermissionIds.length > 0 && sectionPermissionIds.every((id) => selectedPermissions.includes(id));
+                  const fallbackPermissions = section.permissions.length === 0
+                    ? virtualPermissions.filter((permission) => inferPermissionSection(permission) === section.key)
+                    : [];
+
+                  return (
+                    <div key={section.key} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-900">{section.label}</h4>
+                          <p className="text-xs text-gray-500">{section.permissions.length} permission(s)</p>
+                          {getDisplayActions(section.key).length ? (
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                              Actions: {getDisplayActions(section.key).join(', ')}
+                            </p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleSectionPermissions(section.key)}
+                          className="px-3 py-1 text-xs rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                        >
+                          {allSelected ? 'Clear Section' : 'Select Section'}
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {section.permissions.map((permission) => (
+                          <div key={permission.id} className="flex items-center justify-between p-3 border border-gray-200 bg-white rounded-lg hover:border-indigo-300 transition-colors duration-200">
+                            <div className="flex-1">
+                              <h5 className="text-sm font-medium text-gray-900">{permission.name}</h5>
+                              <p className="text-xs text-gray-600">{permission.description}</p>
+                            </div>
+                            <label className="flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={selectedPermissions.includes(permission.id)}
+                                onChange={() => handlePermissionToggle(permission.id)}
+                                className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                              />
+                            </label>
+                          </div>
+                        ))}
+
+                        {fallbackPermissions.map((permission) => (
+                          <div key={`${section.key}-fallback-${permission.id}`} className="flex items-center justify-between p-3 border border-dashed border-gray-200 bg-white rounded-lg">
+                            <div className="flex-1">
+                              <h5 className="text-sm font-medium text-gray-700">{permission.description}</h5>
+                              <p className="text-xs text-gray-500">Will be created when saved</p>
+                            </div>
+                            <label className="flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={selectedPermissions.includes(permission.id)}
+                                onChange={() => handlePermissionToggle(permission.id)}
+                                className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                              />
+                            </label>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedPermissions.includes(permission.id)}
-                        onChange={() => handlePermissionToggle(permission.id)}
-                        className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                      />
-                    </label>
-                  </div>
-                ))}
+                  );
+                })}
+
+                {permissionSections.every((section) => section.permissions.length === 0) && (
+                  <p className="text-sm text-gray-500">No active permissions found.</p>
+                )}
               </div>
 
               <div className="flex justify-end space-x-4 pt-4 border-t border-gray-200">

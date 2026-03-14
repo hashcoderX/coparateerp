@@ -11,6 +11,7 @@ class DistributionInvoice extends Model
     protected $fillable = [
         'invoice_number',
         'customer_id',
+        'load_id',
         'invoice_date',
         'due_date',
         'subtotal',
@@ -34,6 +35,11 @@ class DistributionInvoice extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(DistributionCustomer::class, 'customer_id');
+    }
+
+    public function assignedLoad(): BelongsTo
+    {
+        return $this->belongsTo(Load::class, 'load_id');
     }
 
     public function items(): HasMany

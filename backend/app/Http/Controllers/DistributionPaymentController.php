@@ -8,6 +8,7 @@ use App\Models\Load;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 class DistributionPaymentController extends Controller
@@ -65,6 +66,7 @@ class DistributionPaymentController extends Controller
         $validator = Validator::make($request->all(), [
             'payment_number' => 'required|string|max:60|unique:distribution_payments,payment_number',
             'distribution_invoice_id' => 'nullable|exists:distribution_invoices,id',
+            'load_id' => 'nullable|exists:loads,id',
             'customer_id' => 'required|exists:distribution_customers,id',
             'payment_date' => 'required|date',
             'amount' => 'required|numeric|gt:0',
@@ -86,7 +88,21 @@ class DistributionPaymentController extends Controller
         $payload = $validator->validated();
 
         $payment = DB::transaction(function () use ($payload, $request) {
-            $payment = DistributionPayment::create([
+            $paymentsHasLoadId = Schema::hasColumn('distribution_payments', 'load_id');
+            $loadId = null;
+
+            if (!empty($payload['distribution_invoice_id'])) {
+                $invoice = DistributionInvoice::find($payload['distribution_invoice_id']);
+                if ($invoice) {
+                    $loadId = $invoice->load_id;
+                }
+            }
+
+            if (!$loadId && !empty($payload['load_id'])) {
+                $loadId = $payload['load_id'];
+            }
+
+            $paymentData = [
                 'payment_number' => $payload['payment_number'],
                 'distribution_invoice_id' => $payload['distribution_invoice_id'] ?? null,
                 'customer_id' => $payload['customer_id'],
@@ -98,7 +114,13 @@ class DistributionPaymentController extends Controller
                 'status' => $payload['status'] ?? 'received',
                 'notes' => $payload['notes'] ?? null,
                 'received_by' => $request->user()?->id,
-            ]);
+            ];
+
+            if ($paymentsHasLoadId) {
+                $paymentData['load_id'] = $loadId;
+            }
+
+            $payment = DistributionPayment::create($paymentData);
 
             if (!empty($payload['distribution_invoice_id'])) {
                 $invoice = DistributionInvoice::find($payload['distribution_invoice_id']);

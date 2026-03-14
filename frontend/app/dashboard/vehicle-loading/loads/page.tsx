@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
@@ -75,6 +75,130 @@ interface LoadItem {
   qty: number;
 }
 
+interface LoadDeliverySummary {
+  load: {
+    id: number;
+    load_number: string;
+    status: string;
+    load_date: string;
+    delivery_date: string | null;
+  };
+  period: {
+    from: string;
+    to: string;
+  };
+  invoices: {
+    count: number;
+    total_amount: number;
+    total_cost: number;
+    total_profit: number;
+  };
+  payments: {
+    total_collected: number;
+    by_method: Record<string, { total: number; count: number }>;
+    cheques: Array<{
+      id: number;
+      payment_number: string;
+      payment_date: string;
+      amount: number;
+      payment_method: string;
+      reference_no: string | null;
+      bank_name: string | null;
+      status: string;
+    }>;
+  };
+  items: Array<{
+    item_code: string;
+    item_name: string;
+    unit: string | null;
+    sold_qty: number;
+    sold_value: number;
+    return_qty: number;
+    return_value: number;
+    net_qty: number;
+    net_value: number;
+    cost_value: number;
+    profit: number;
+  }>;
+}
+
+interface DistributionInvoiceListResponse {
+  data?: {
+    data?: DistributionInvoiceRecord[];
+  };
+}
+
+interface DistributionInvoiceRecord {
+  id: number;
+  load_id?: number | null;
+  invoice_number?: string;
+  customer_id?: number;
+  total?: number;
+  discount?: number;
+  customer?: {
+    shop_name?: string;
+    customer_code?: string;
+  };
+  items?: DistributionInvoiceItemRecord[];
+}
+
+interface DistributionInvoiceItemRecord {
+  item_code: string;
+  item_name: string;
+  quantity: number;
+  unit_price: number;
+}
+
+interface SoldItemProfitRow {
+  item_code: string;
+  item_name: string;
+  sold_qty: number;
+  avg_unit_price: number;
+  gross_sales: number;
+  discount_allocated: number;
+  net_sales: number;
+  out_price: number;
+  cost_value: number;
+  profit: number;
+}
+
+interface DistributionPaymentListResponse {
+  data?: {
+    data?: DistributionPaymentRecord[];
+  };
+}
+
+interface DistributionPaymentRecord {
+  id: number;
+  load_id?: number | null;
+  distribution_invoice_id?: number | null;
+  customer_id?: number;
+  payment_number?: string;
+  payment_date?: string;
+  amount?: number;
+  payment_method?: string;
+  reference_no?: string | null;
+  bank_name?: string | null;
+  status?: string;
+  customer?: {
+    shop_name?: string;
+    customer_code?: string;
+  };
+  invoice?: {
+    invoice_number?: string;
+  };
+}
+
+interface LoadCustomerBaseRow {
+  customer_id: number;
+  customer_name: string;
+  customer_code: string;
+  invoices_count: number;
+  total_sale: number;
+  collected: number;
+  balance: number;
+}
+
 export default function LoadsPage() {
   const [token, setToken] = useState('');
   const [loads, setLoads] = useState<Load[]>([]);
@@ -84,11 +208,17 @@ export default function LoadsPage() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [selectedLoadDetails, setSelectedLoadDetails] = useState<Load | null>(null);
   const [selectedLoadItems, setSelectedLoadItems] = useState<LoadItem[]>([]);
+  const [soldItemProfitRows, setSoldItemProfitRows] = useState<SoldItemProfitRow[]>([]);
+  const [loadInvoices, setLoadInvoices] = useState<DistributionInvoiceRecord[]>([]);
+  const [loadPayments, setLoadPayments] = useState<DistributionPaymentRecord[]>([]);
   const [editingLoad, setEditingLoad] = useState<Load | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [salesRefs, setSalesRefs] = useState<Driver[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [confirmAction, setConfirmAction] = useState<{ type: 'delete' | 'complete'; load: Load } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [deliverySummary, setDeliverySummary] = useState<LoadDeliverySummary | null>(null);
   const [formData, setFormData] = useState({
     load_number: '',
     vehicle_id: '',
@@ -100,6 +230,68 @@ export default function LoadsPage() {
     notes: ''
   });
   const router = useRouter();
+
+  const soldProfitTotals = useMemo(() => {
+    return soldItemProfitRows.reduce(
+      (acc, row) => {
+        acc.gross += Number(row.gross_sales || 0);
+        acc.discount += Number(row.discount_allocated || 0);
+        acc.net += Number(row.net_sales || 0);
+        acc.cost += Number(row.cost_value || 0);
+        acc.profit += Number(row.profit || 0);
+        return acc;
+      },
+      { gross: 0, discount: 0, net: 0, cost: 0, profit: 0 }
+    );
+  }, [soldItemProfitRows]);
+
+  const customerBaseRows = useMemo<LoadCustomerBaseRow[]>(() => {
+    const grouped = new Map<number, LoadCustomerBaseRow>();
+
+    loadInvoices.forEach((inv) => {
+      const customerId = Number(inv.customer_id || 0);
+      if (!customerId) return;
+
+      const existing = grouped.get(customerId) || {
+        customer_id: customerId,
+        customer_name: inv.customer?.shop_name || `Customer #${customerId}`,
+        customer_code: inv.customer?.customer_code || '-',
+        invoices_count: 0,
+        total_sale: 0,
+        collected: 0,
+        balance: 0,
+      };
+
+      existing.invoices_count += 1;
+      existing.total_sale += Number(inv.total || 0);
+      grouped.set(customerId, existing);
+    });
+
+    loadPayments.forEach((pay) => {
+      const customerId = Number(pay.customer_id || 0);
+      if (!customerId) return;
+
+      const existing = grouped.get(customerId) || {
+        customer_id: customerId,
+        customer_name: pay.customer?.shop_name || `Customer #${customerId}`,
+        customer_code: pay.customer?.customer_code || '-',
+        invoices_count: 0,
+        total_sale: 0,
+        collected: 0,
+        balance: 0,
+      };
+
+      existing.collected += Number(pay.amount || 0);
+      grouped.set(customerId, existing);
+    });
+
+    return Array.from(grouped.values())
+      .map((row) => ({
+        ...row,
+        balance: row.total_sale - row.collected,
+      }))
+      .sort((a, b) => b.total_sale - a.total_sale);
+  }, [loadInvoices, loadPayments]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -275,18 +467,134 @@ export default function LoadsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this load?')) {
-      try {
-        await axios.delete(`http://localhost:8000/api/vehicle-loading/loads/${id}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        fetchLoads(); // Refresh the list
-      } catch (error) {
-        console.error('Error deleting load:', error);
-      }
+    try {
+      await axios.delete(`http://localhost:8000/api/vehicle-loading/loads/${id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      fetchLoads(); // Refresh the list
+    } catch (error) {
+      console.error('Error deleting load:', error);
+      alert('Failed to delete load');
     }
+  };
+
+  const handleCompleteLoad = async (load: Load) => {
+    try {
+      const today = new Date();
+      const loadDate = new Date(load.load_date);
+      const effectiveDate = loadDate > today ? loadDate : today;
+      const year = effectiveDate.getFullYear();
+      const month = String(effectiveDate.getMonth() + 1).padStart(2, '0');
+      const day = String(effectiveDate.getDate()).padStart(2, '0');
+      const deliveryDate = `${year}-${month}-${day}`;
+
+      await axios.put(`http://localhost:8000/api/vehicle-loading/loads/${load.id}`, {
+        load_number: load.load_number,
+        vehicle_id: load.vehicle_id,
+        driver_id: load.driver_id,
+        sales_ref_id: load.sales_ref_id ?? null,
+        route_id: load.route_id,
+        status: 'delivered',
+        load_date: load.load_date,
+        delivery_date: deliveryDate,
+        total_weight: load.total_weight,
+        notes: load.notes,
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      fetchLoads();
+    } catch (error) {
+      console.error('Error completing load:', error);
+      alert('Failed to complete load');
+    }
+  };
+
+  const computeSoldItemsProfit = (
+    loadItems: LoadItem[],
+    invoices: DistributionInvoiceRecord[]
+  ): { rows: SoldItemProfitRow[]; totals: { gross: number; discount: number; net: number; cost: number; profit: number } } => {
+    const costByCode = new Map<string, number>();
+    const nameByCode = new Map<string, string>();
+
+    loadItems.forEach((li) => {
+      const code = String(li.product_code || '').trim();
+      if (!code) return;
+      costByCode.set(code, Number(li.out_price) || 0);
+      nameByCode.set(code, li.name || code);
+    });
+
+    const bucket = new Map<string, SoldItemProfitRow>();
+
+    invoices.forEach((inv) => {
+      const items = Array.isArray(inv.items) ? inv.items : [];
+      const grossTotal = items.reduce(
+        (sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
+        0
+      );
+      const invoiceDiscount = Math.max(0, Number(inv.discount) || 0);
+
+      items.forEach((it) => {
+        const code = String(it.item_code || '').trim();
+        if (!code) return;
+
+        const qty = Number(it.quantity) || 0;
+        const unitPrice = Number(it.unit_price) || 0;
+        const gross = qty * unitPrice;
+        const discountShare = grossTotal > 0 ? (invoiceDiscount * gross) / grossTotal : 0;
+        const net = Math.max(0, gross - discountShare);
+        const outPrice = costByCode.get(code) ?? 0;
+        const cost = qty * outPrice;
+
+        const existing = bucket.get(code) || {
+          item_code: code,
+          item_name: it.item_name || nameByCode.get(code) || code,
+          sold_qty: 0,
+          avg_unit_price: 0,
+          gross_sales: 0,
+          discount_allocated: 0,
+          net_sales: 0,
+          out_price: outPrice,
+          cost_value: 0,
+          profit: 0,
+        };
+
+        existing.sold_qty += qty;
+        existing.gross_sales += gross;
+        existing.discount_allocated += discountShare;
+        existing.net_sales += net;
+        existing.cost_value += cost;
+        existing.profit += net - cost;
+        existing.out_price = outPrice;
+
+        bucket.set(code, existing);
+      });
+    });
+
+    const rows = Array.from(bucket.values())
+      .map((row) => ({
+        ...row,
+        avg_unit_price: row.sold_qty > 0 ? row.gross_sales / row.sold_qty : 0,
+      }))
+      .sort((a, b) => b.net_sales - a.net_sales);
+
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.gross += row.gross_sales;
+        acc.discount += row.discount_allocated;
+        acc.net += row.net_sales;
+        acc.cost += row.cost_value;
+        acc.profit += row.profit;
+        return acc;
+      },
+      { gross: 0, discount: 0, net: 0, cost: 0, profit: 0 }
+    );
+
+    return { rows, totals };
   };
 
   const handleViewDetails = async (loadId: number) => {
@@ -295,8 +603,12 @@ export default function LoadsPage() {
       setDetailsLoading(true);
       setSelectedLoadDetails(null);
       setSelectedLoadItems([]);
+      setSoldItemProfitRows([]);
+      setLoadInvoices([]);
+      setLoadPayments([]);
+      setDeliverySummary(null);
 
-      const [loadRes, itemsRes] = await Promise.all([
+      const [loadRes, itemsRes, summaryRes, invoicesRes, paymentsRes] = await Promise.all([
         axios.get(`http://localhost:8000/api/vehicle-loading/loads/${loadId}`, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -308,10 +620,43 @@ export default function LoadsPage() {
           },
           params: { load_id: loadId },
         }),
+        axios.get(`http://localhost:8000/api/vehicle-loading/loads/${loadId}/delivery-summary`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }).catch(() => null),
+        axios.get<DistributionInvoiceListResponse>('http://localhost:8000/api/distribution/invoices', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          params: { per_page: 1000 },
+        }).catch(() => null),
+        axios.get<DistributionPaymentListResponse>('http://localhost:8000/api/distribution/payments', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          params: { per_page: 1000 },
+        }).catch(() => null),
       ]);
 
       setSelectedLoadDetails(loadRes.data);
-      setSelectedLoadItems(Array.isArray(itemsRes.data) ? itemsRes.data : []);
+      const loadItems = Array.isArray(itemsRes.data) ? itemsRes.data : [];
+      setSelectedLoadItems(loadItems);
+
+      const allInvoices = invoicesRes?.data?.data?.data || [];
+      const loadInvoices = allInvoices.filter((inv) => Number(inv.load_id) === Number(loadId));
+      setLoadInvoices(loadInvoices);
+
+      const allPayments = paymentsRes?.data?.data?.data || [];
+      const loadPayments = allPayments.filter((pay) => Number(pay.load_id) === Number(loadId));
+      setLoadPayments(loadPayments);
+
+      const soldProfit = computeSoldItemsProfit(loadItems, loadInvoices);
+      setSoldItemProfitRows(soldProfit.rows);
+
+      if (summaryRes && summaryRes.data && summaryRes.data.data) {
+        setDeliverySummary(summaryRes.data.data as LoadDeliverySummary);
+      }
     } catch (error) {
       console.error('Error fetching load details:', error);
       alert('Failed to load vehicle load details');
@@ -540,6 +885,14 @@ export default function LoadsPage() {
                     >
                       View
                     </button>
+                    {load.status !== 'delivered' && load.status !== 'cancelled' && (
+                      <button
+                        onClick={() => setConfirmAction({ type: 'complete', load })}
+                        className="text-emerald-600 hover:text-emerald-900 mr-4"
+                      >
+                        Complete
+                      </button>
+                    )}
                     <button
                       onClick={() => handleEdit(load)}
                       className="text-indigo-600 hover:text-indigo-900 mr-4"
@@ -547,7 +900,7 @@ export default function LoadsPage() {
                       Edit
                     </button>
                     <button
-                      onClick={() => handleDelete(load.id)}
+                      onClick={() => setConfirmAction({ type: 'delete', load })}
                       className="text-red-600 hover:text-red-900"
                     >
                       Delete
@@ -571,6 +924,9 @@ export default function LoadsPage() {
                     setShowDetailsModal(false);
                     setSelectedLoadDetails(null);
                     setSelectedLoadItems([]);
+                    setSoldItemProfitRows([]);
+                    setLoadInvoices([]);
+                    setLoadPayments([]);
                   }}
                   className="text-gray-400 hover:text-gray-600 text-2xl"
                 >
@@ -646,14 +1002,250 @@ export default function LoadsPage() {
                     <p className="text-sm text-gray-800">{selectedLoadDetails.notes || '-'}</p>
                   </div>
 
+                  {deliverySummary && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 space-y-3">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                        <h4 className="text-sm font-semibold text-emerald-900">Load Delivery Summary</h4>
+                        <p className="text-xs text-emerald-800">
+                          Period: {new Date(deliverySummary.period.from).toLocaleDateString()} – {new Date(deliverySummary.period.to).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-emerald-800 uppercase">Total Sale (Invoices)</p>
+                          <p className="text-base font-semibold text-emerald-900">
+                            {Number(deliverySummary.invoices.total_amount || 0).toFixed(2)}
+                          </p>
+                          <p className="text-xs text-emerald-700">{deliverySummary.invoices.count} invoice(s)</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-emerald-800 uppercase">Total Collected</p>
+                          <p className="text-base font-semibold text-emerald-900">
+                            {Number(deliverySummary.payments.total_collected || 0).toFixed(2)}
+                          </p>
+                          <p className="text-xs text-emerald-700">
+                            Cash: {Number(deliverySummary.payments.by_method?.cash?.total || 0).toFixed(2)} ·
+                            {' '}Cheque: {Number(deliverySummary.payments.by_method?.check?.total || 0).toFixed(2)} ·
+                            {' '}Bank: {Number(deliverySummary.payments.by_method?.bank_transfer?.total || 0).toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-emerald-800 uppercase">Balance (Approx)</p>
+                          <p className="text-base font-semibold text-emerald-900">
+                            {(
+                              Number(deliverySummary.invoices.total_amount || 0) -
+                              Number(deliverySummary.payments.total_collected || 0)
+                            ).toFixed(2)}
+                          </p>
+                          <p className="text-xs text-emerald-700">Total sale minus collected payments</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mt-3 border-t border-emerald-100 pt-3">
+                        <div>
+                          <p className="text-xs text-emerald-800 uppercase">Total Cost (Estimate)</p>
+                          <p className="text-base font-semibold text-emerald-900">
+                            {Number(
+                              soldItemProfitRows.length > 0
+                                ? soldProfitTotals.cost
+                                : (deliverySummary.invoices.total_cost || 0)
+                            ).toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-emerald-800 uppercase">Total Profit (Estimate)</p>
+                          <p className="text-base font-semibold text-emerald-900">
+                            {Number(
+                              soldItemProfitRows.length > 0
+                                ? soldProfitTotals.profit
+                                : (deliverySummary.invoices.total_profit || 0)
+                            ).toFixed(2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-emerald-800 uppercase">Margin % (Approx)</p>
+                          <p className="text-base font-semibold text-emerald-900">
+                            {(soldItemProfitRows.length > 0
+                              ? soldProfitTotals.net
+                              : Number(deliverySummary.invoices.total_amount || 0)) > 0
+                              ? ((
+                                  (soldItemProfitRows.length > 0
+                                    ? soldProfitTotals.profit
+                                    : Number(deliverySummary.invoices.total_profit || 0)) /
+                                  (soldItemProfitRows.length > 0
+                                    ? soldProfitTotals.net
+                                    : Number(deliverySummary.invoices.total_amount || 0))
+                                ) * 100).toFixed(1)
+                              : '0.0'}
+                            %
+                          </p>
+                        </div>
+                      </div>
+
+                      {deliverySummary.payments.cheques.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-xs text-emerald-800 uppercase mb-1">Cheque Details</p>
+                          <div className="overflow-x-auto border border-emerald-100 rounded-md bg-white">
+                            <table className="min-w-full divide-y divide-emerald-100 text-xs">
+                              <thead className="bg-emerald-50">
+                                <tr>
+                                  <th className="px-3 py-2 text-left font-medium text-emerald-800">Number</th>
+                                  <th className="px-3 py-2 text-left font-medium text-emerald-800">Date</th>
+                                  <th className="px-3 py-2 text-right font-medium text-emerald-800">Amount</th>
+                                  <th className="px-3 py-2 text-left font-medium text-emerald-800">Bank</th>
+                                  <th className="px-3 py-2 text-left font-medium text-emerald-800">Reference</th>
+                                  <th className="px-3 py-2 text-left font-medium text-emerald-800">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-emerald-50">
+                                {deliverySummary.payments.cheques.map((chq) => (
+                                  <tr key={chq.id}>
+                                    <td className="px-3 py-1 text-emerald-900">{chq.payment_number}</td>
+                                    <td className="px-3 py-1 text-emerald-900">{new Date(chq.payment_date).toLocaleDateString()}</td>
+                                    <td className="px-3 py-1 text-emerald-900 text-right">{Number(chq.amount).toFixed(2)}</td>
+                                    <td className="px-3 py-1 text-emerald-900">{chq.bank_name || '-'}</td>
+                                    <td className="px-3 py-1 text-emerald-900">{chq.reference_no || '-'}</td>
+                                    <td className="px-3 py-1 text-emerald-900 capitalize">{chq.status}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <div className="px-4 pt-3 pb-1 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Collected Payment Details (By Load)</span>
+                    </div>
+                    <table className="min-w-full divide-y divide-gray-200 text-xs">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Payment #</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Date</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Customer</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Invoice</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Method</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Reference</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Bank</th>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Status</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {loadPayments.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500">
+                              No collected payments found for this load.
+                            </td>
+                          </tr>
+                        ) : (
+                          loadPayments.map((pay) => (
+                            <tr key={pay.id}>
+                              <td className="px-4 py-2 text-gray-700">{pay.payment_number || `PAY-${pay.id}`}</td>
+                              <td className="px-4 py-2 text-gray-700">
+                                {pay.payment_date ? new Date(pay.payment_date).toLocaleDateString() : '-'}
+                              </td>
+                              <td className="px-4 py-2 text-gray-700">
+                                {pay.customer?.shop_name || (pay.customer_id ? `Customer #${pay.customer_id}` : '-')}
+                              </td>
+                              <td className="px-4 py-2 text-gray-700">{pay.invoice?.invoice_number || '-'}</td>
+                              <td className="px-4 py-2 text-gray-700 capitalize">{(pay.payment_method || '-').replace('_', ' ')}</td>
+                              <td className="px-4 py-2 text-gray-700">{pay.reference_no || '-'}</td>
+                              <td className="px-4 py-2 text-gray-700">{pay.bank_name || '-'}</td>
+                              <td className="px-4 py-2 text-gray-700 capitalize">{pay.status || '-'}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(pay.amount || 0).toFixed(2)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      {loadPayments.length > 0 && (
+                        <tfoot className="bg-gray-50 border-t border-gray-200">
+                          <tr>
+                            <td colSpan={8} className="px-4 py-2 text-right font-semibold text-gray-800">Total Collected</td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-900">
+                              {loadPayments.reduce((sum, pay) => sum + Number(pay.amount || 0), 0).toFixed(2)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+
+                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <div className="px-4 pt-3 pb-1 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Customer Base Summary (By Load)</span>
+                    </div>
+                    <table className="min-w-full divide-y divide-gray-200 text-xs">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Customer</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Invoices</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Total Sale</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Collected</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {customerBaseRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500">
+                              No customer base data found for this load.
+                            </td>
+                          </tr>
+                        ) : (
+                          customerBaseRows.map((row) => (
+                            <tr key={row.customer_id}>
+                              <td className="px-4 py-2 text-gray-700">
+                                <div className="flex flex-col">
+                                  <span>{row.customer_name}</span>
+                                  <span className="text-[10px] text-gray-500">{row.customer_code}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-2 text-right text-gray-700">{row.invoices_count}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.total_sale).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.collected).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right font-semibold text-gray-800">{Number(row.balance).toFixed(2)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      {customerBaseRows.length > 0 && (
+                        <tfoot className="bg-gray-50 border-t border-gray-200">
+                          <tr>
+                            <td className="px-4 py-2 font-semibold text-gray-800">Total</td>
+                            <td className="px-4 py-2 text-right text-gray-700">
+                              {customerBaseRows.reduce((sum, row) => sum + Number(row.invoices_count || 0), 0)}
+                            </td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-800">
+                              {customerBaseRows.reduce((sum, row) => sum + Number(row.total_sale || 0), 0).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-800">
+                              {customerBaseRows.reduce((sum, row) => sum + Number(row.collected || 0), 0).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-900">
+                              {customerBaseRows.reduce((sum, row) => sum + Number(row.balance || 0), 0).toFixed(2)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+
+                  {/* Loaded items table */}
+                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <div className="px-4 pt-3 pb-1 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Loaded Items (Truck)</span>
+                    </div>
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product Code</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty (Current)</th>
                           <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sell Price</th>
                         </tr>
                       </thead>
@@ -677,6 +1269,82 @@ export default function LoadsPage() {
                     </table>
                   </div>
 
+                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                    <div className="px-4 pt-3 pb-1 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Sold Items & Profit (By Load)</span>
+                    </div>
+                    <table className="min-w-full divide-y divide-gray-200 text-xs">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase">Item</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Sold Qty</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Avg Sell</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Gross</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Discount</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Net Sale</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Out Price</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Cost</th>
+                          <th className="px-4 py-2 text-right font-medium text-gray-500 uppercase">Profit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {soldItemProfitRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500">
+                              No sold item data found for this load.
+                            </td>
+                          </tr>
+                        ) : (
+                          soldItemProfitRows.map((row) => (
+                            <tr key={row.item_code}>
+                              <td className="px-4 py-2 text-gray-700">
+                                <div className="flex flex-col">
+                                  <span>{row.item_name}</span>
+                                  <span className="text-[10px] text-gray-500">{row.item_code}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.sold_qty).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.avg_unit_price).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.gross_sales).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.discount_allocated).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.net_sales).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.out_price).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right text-gray-700">{Number(row.cost_value).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-right font-semibold text-gray-800">{Number(row.profit).toFixed(2)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      {soldItemProfitRows.length > 0 && (
+                        <tfoot className="bg-gray-50 border-t border-gray-200">
+                          <tr>
+                            <td className="px-4 py-2 font-semibold text-gray-800">Total</td>
+                            <td className="px-4 py-2 text-right text-gray-700">
+                              {soldItemProfitRows.reduce((sum, row) => sum + Number(row.sold_qty || 0), 0).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2"></td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-800">
+                              {soldItemProfitRows.reduce((sum, row) => sum + Number(row.gross_sales || 0), 0).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-800">
+                              {soldItemProfitRows.reduce((sum, row) => sum + Number(row.discount_allocated || 0), 0).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-800">
+                              {soldItemProfitRows.reduce((sum, row) => sum + Number(row.net_sales || 0), 0).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2"></td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-800">
+                              {soldItemProfitRows.reduce((sum, row) => sum + Number(row.cost_value || 0), 0).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-900">
+                              {soldItemProfitRows.reduce((sum, row) => sum + Number(row.profit || 0), 0).toFixed(2)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+
                   <div className="flex justify-end gap-3">
                     <button
                       type="button"
@@ -695,6 +1363,57 @@ export default function LoadsPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmAction && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-11/12 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">
+              {confirmAction.type === 'complete' ? 'Complete Load' : 'Delete Load'}
+            </h3>
+            <p className="text-sm text-gray-700 mb-4">
+              {confirmAction.type === 'complete'
+                ? `Mark load ${confirmAction.load.load_number} as delivered and end this route?`
+                : `Are you sure you want to delete load ${confirmAction.load.load_number}? This action cannot be undone.`}
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={confirming}
+                onClick={() => {
+                  if (confirming) return;
+                  setConfirmAction(null);
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={confirming}
+                onClick={async () => {
+                  if (!confirmAction) return;
+                  setConfirming(true);
+                  try {
+                    if (confirmAction.type === 'delete') {
+                      await handleDelete(confirmAction.load.id);
+                    } else {
+                      await handleCompleteLoad(confirmAction.load);
+                    }
+                    setConfirmAction(null);
+                  } finally {
+                    setConfirming(false);
+                  }
+                }}
+                className={`px-4 py-2 rounded-md text-sm font-medium text-white disabled:opacity-50 ${
+                  confirmAction.type === 'complete' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
+                }`}
+              >
+                {confirming ? 'Please wait...' : confirmAction.type === 'complete' ? 'Yes, Complete' : 'Yes, Delete'}
+              </button>
             </div>
           </div>
         </div>

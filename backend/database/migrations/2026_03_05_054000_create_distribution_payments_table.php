@@ -11,6 +11,7 @@ return new class extends Migration {
             $table->id();
             $table->string('payment_number', 60)->unique();
             $table->foreignId('distribution_invoice_id')->nullable()->constrained('distribution_invoices')->nullOnDelete();
+            $table->foreignId('load_id')->nullable()->constrained('loads')->nullOnDelete();
             $table->foreignId('customer_id')->constrained('distribution_customers')->cascadeOnDelete();
             $table->date('payment_date');
             $table->decimal('amount', 12, 2)->default(0);

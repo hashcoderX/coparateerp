@@ -32,13 +32,22 @@ interface RouteOption {
 
 export default function DistributionCustomersPage() {
   const [token, setToken] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [assignedRouteId, setAssignedRouteId] = useState('');
+  const [selectedRouteFilter, setSelectedRouteFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const [routes, setRoutes] = useState<RouteOption[]>([]);
+  const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [outstandingFilter, setOutstandingFilter] = useState<'all' | 'with_due' | 'zero_due'>('all');
+  const [minOutstanding, setMinOutstanding] = useState('');
+  const [maxOutstanding, setMaxOutstanding] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const pageSize = 10;
   const [formData, setFormData] = useState({
     shop_name: '',
     customer_code: '',
@@ -50,6 +59,15 @@ export default function DistributionCustomersPage() {
     status: 'active' as 'active' | 'inactive',
   });
   const router = useRouter();
+
+  const generateCustomerCode = () => {
+    const now = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const datePart = `${now.getFullYear().toString().slice(-2)}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const randomPart = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `CUS-${datePart}${timePart}-${randomPart}`;
+  };
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -71,29 +89,104 @@ export default function DistributionCustomersPage() {
     if (token) {
       fetchCustomers();
     }
-  }, [token, assignedRouteId]);
+  }, [token, assignedRouteId, selectedRouteFilter, isAdmin]);
+
+  const getInvoiceDueAmount = (invoice: any): number => {
+    const total = Number(invoice?.total || 0);
+    const paidAmount = Number(invoice?.paid_amount || 0);
+    const explicitDue = Number(invoice?.due_amount || invoice?.balance_amount || 0);
+
+    if (explicitDue > 0) {
+      return explicitDue;
+    }
+
+    return Math.max(0, total - paidAmount);
+  };
+
+  const filteredCustomers = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    const min = minOutstanding.trim() === '' ? null : Number(minOutstanding);
+    const max = maxOutstanding.trim() === '' ? null : Number(maxOutstanding);
+
+    return customers.filter((customer) => {
+      const customerOutstanding = Number(customer.outstanding || 0);
+
+      const matchesText = !q || [
+        customer.shop_name,
+        customer.customer_code,
+        customer.owner_name || '',
+        customer.phone || '',
+        customer.address || '',
+        customer.route?.name || '',
+      ].some((value) => String(value).toLowerCase().includes(q));
+
+      const matchesStatus = statusFilter === 'all' || customer.status === statusFilter;
+
+      const matchesOutstandingType =
+        outstandingFilter === 'all' ||
+        (outstandingFilter === 'with_due' && customerOutstanding > 0) ||
+        (outstandingFilter === 'zero_due' && customerOutstanding <= 0);
+
+      const matchesMin = min === null || Number.isNaN(min) || customerOutstanding >= min;
+      const matchesMax = max === null || Number.isNaN(max) || customerOutstanding <= max;
+
+      return matchesText && matchesStatus && matchesOutstandingType && matchesMin && matchesMax;
+    });
+  }, [customers, searchText, statusFilter, outstandingFilter, minOutstanding, maxOutstanding]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filteredCustomers.length]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredCustomers.length / pageSize)),
+    [filteredCustomers.length, pageSize]
+  );
+
+  const pagedCustomers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredCustomers.slice(start, start + pageSize);
+  }, [filteredCustomers, currentPage, pageSize]);
 
   const resolveAssignedRoute = async () => {
     const routeFromQuery = typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search).get('route_id')
       : null;
-    if (routeFromQuery) {
-      setAssignedRouteId(routeFromQuery);
-      localStorage.setItem('distribution_assigned_route_id', routeFromQuery);
-      return;
-    }
-
-    const cachedRouteId = localStorage.getItem('distribution_assigned_route_id');
-    if (cachedRouteId) {
-      setAssignedRouteId(cachedRouteId);
-    }
 
     try {
       const userRes = await axios.get('http://localhost:8000/api/user', {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      const employeeId = Number(userRes.data?.employee_id || userRes.data?.employee?.id || 0);
+      const userData = userRes.data || {};
+      const employeeId = Number(userData?.employee_id || userData?.employee?.id || 0);
+      const roleNames = [
+        String(userData?.role || ''),
+        ...(Array.isArray(userData?.roles) ? userData.roles.map((r: any) => String(r?.name || r || '')) : []),
+      ].join(' ').toLowerCase();
+      const adminUser = !employeeId || roleNames.includes('super admin') || roleNames.includes('admin');
+      setIsAdmin(adminUser);
+
+      if (adminUser) {
+        const cachedAdminRoute = localStorage.getItem('distribution_admin_route_filter') || '';
+        const adminRoute = routeFromQuery || cachedAdminRoute;
+        setAssignedRouteId('');
+        if (adminRoute) {
+          setSelectedRouteFilter(adminRoute);
+        }
+        return;
+      }
+
+      if (routeFromQuery) {
+        setAssignedRouteId(routeFromQuery);
+        localStorage.setItem('distribution_assigned_route_id', routeFromQuery);
+        return;
+      }
+
+      const cachedRouteId = localStorage.getItem('distribution_assigned_route_id');
+      if (cachedRouteId) {
+        setAssignedRouteId(cachedRouteId);
+      }
       if (!employeeId) return;
 
       const loadsRes = await axios.get('http://localhost:8000/api/vehicle-loading/loads', {
@@ -118,15 +211,46 @@ export default function DistributionCustomersPage() {
   const fetchCustomers = async () => {
     try {
       setLoading(true);
-      const res = await axios.get('http://localhost:8000/api/distribution/customers', {
-        headers: { Authorization: `Bearer ${token}` },
-        params: { per_page: 100 }
+      const [customersRes, invoicesRes] = await Promise.all([
+        axios.get('http://localhost:8000/api/distribution/customers', {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { per_page: 1000 }
+        }),
+        axios.get('http://localhost:8000/api/distribution/invoices', {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { per_page: 1000 }
+        }),
+      ]);
+
+      const allCustomers: Customer[] = customersRes.data?.data?.data || [];
+      const allInvoices = invoicesRes.data?.data?.data || [];
+
+      const dueByCustomer = new Map<number, number>();
+      allInvoices.forEach((invoice: any) => {
+        const status = String(invoice?.status || '').toLowerCase();
+        if (status === 'cancelled') return;
+
+        const customerId = Number(invoice?.customer_id || 0);
+        if (!customerId) return;
+
+        const due = getInvoiceDueAmount(invoice);
+        if (due <= 0) return;
+
+        dueByCustomer.set(customerId, (dueByCustomer.get(customerId) || 0) + due);
       });
-      const allCustomers: Customer[] = res.data?.data?.data || [];
-      const filteredCustomers = assignedRouteId
-        ? allCustomers.filter((customer) => String(customer.route_id || '') === assignedRouteId)
+
+      const activeRouteFilter = isAdmin ? selectedRouteFilter : assignedRouteId;
+
+      const filteredCustomers = activeRouteFilter
+        ? allCustomers.filter((customer) => String(customer.route_id || '') === activeRouteFilter)
         : allCustomers;
-      setCustomers(filteredCustomers);
+
+      const customersWithOutstanding = filteredCustomers.map((customer) => ({
+        ...customer,
+        outstanding: Number(dueByCustomer.get(Number(customer.id)) || 0),
+      }));
+
+      setCustomers(customersWithOutstanding);
     } catch (error) {
       console.error('Error fetching customers:', error);
       setCustomers([]);
@@ -150,16 +274,21 @@ export default function DistributionCustomersPage() {
   const resetForm = () => {
     setFormData({
       shop_name: '',
-      customer_code: '',
+      customer_code: generateCustomerCode(),
       owner_name: '',
       phone: '',
       address: '',
-      route_id: assignedRouteId || '',
+      route_id: isAdmin ? selectedRouteFilter : (assignedRouteId || ''),
       outstanding: '',
       status: 'active',
     });
     setEditingCustomer(null);
   };
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    localStorage.setItem('distribution_admin_route_filter', selectedRouteFilter || '');
+  }, [isAdmin, selectedRouteFilter]);
 
   const openCreate = () => {
     resetForm();
@@ -277,7 +406,7 @@ export default function DistributionCustomersPage() {
             <p className="mt-2 text-sm sm:text-base md:text-lg text-gray-600">
               Register and manage distribution customers.
             </p>
-            {assignedRouteId && (
+            {!isAdmin && assignedRouteId && (
               <p className="mt-1 text-sm text-green-700 font-medium">Auto route: {routeLabel}</p>
             )}
           </div>
@@ -303,6 +432,112 @@ export default function DistributionCustomersPage() {
           </div>
         </div>
 
+        {isAdmin && (
+          <div className="mb-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 items-end">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Filter By Route</label>
+                <select
+                  value={selectedRouteFilter}
+                  onChange={(e) => setSelectedRouteFilter(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                >
+                  <option value="">All Routes</option>
+                  {routes.map((route) => (
+                    <option key={route.id} value={String(route.id)}>
+                      {route.name} ({route.origin} → {route.destination})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="text-xs text-gray-500 md:text-right">
+                Showing {customers.length} customer(s)
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="mb-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-gray-900">Advanced Search</h2>
+            <p className="text-xs text-gray-500">Search by shop/code/contact and filter by status and outstanding amount.</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 sm:gap-4 items-end">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Search</label>
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="Shop, code, owner, phone, address"
+                className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+                className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+              >
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Outstanding</label>
+              <select
+                value={outstandingFilter}
+                onChange={(e) => setOutstandingFilter(e.target.value as 'all' | 'with_due' | 'zero_due')}
+                className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+              >
+                <option value="all">All</option>
+                <option value="with_due">With Due</option>
+                <option value="zero_due">Zero Due</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Min Outstanding</label>
+              <input
+                type="number"
+                step="0.01"
+                value={minOutstanding}
+                onChange={(e) => setMinOutstanding(e.target.value)}
+                placeholder="0.00"
+                className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Max Outstanding</label>
+              <input
+                type="number"
+                step="0.01"
+                value={maxOutstanding}
+                onChange={(e) => setMaxOutstanding(e.target.value)}
+                placeholder="0.00"
+                className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <p className="text-xs text-gray-500">Matched {filteredCustomers.length} of {customers.length} customer(s).</p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchText('');
+                setStatusFilter('all');
+                setOutstandingFilter('all');
+                setMinOutstanding('');
+                setMaxOutstanding('');
+              }}
+              className="px-3 py-1.5 rounded-md border border-gray-300 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Reset Filters
+            </button>
+          </div>
+        </div>
+
         <div className="bg-white shadow-sm rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -319,12 +554,12 @@ export default function DistributionCustomersPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {customers.length === 0 ? (
+                {filteredCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">No customers found.</td>
+                    <td colSpan={8} className="px-6 py-10 text-center text-sm text-gray-500">No customers found.</td>
                   </tr>
                 ) : (
-                  customers.map((customer) => (
+                  pagedCustomers.map((customer) => (
                     <tr key={customer.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{customer.shop_name}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{customer.customer_code}</td>
@@ -361,6 +596,39 @@ export default function DistributionCustomersPage() {
               </tbody>
             </table>
           </div>
+
+          {filteredCustomers.length > 0 && (
+            <div className="px-4 py-3 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-600">
+              <div>
+                {(() => {
+                  const start = (currentPage - 1) * pageSize + 1;
+                  const end = Math.min(filteredCustomers.length, currentPage * pageSize);
+                  return `Showing ${start}-${end} of ${filteredCustomers.length} customers`;
+                })()}
+              </div>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1 rounded-md border border-gray-300 bg-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                  Previous
+                </button>
+                <span className="text-[11px] text-gray-500">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1 rounded-md border border-gray-300 bg-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

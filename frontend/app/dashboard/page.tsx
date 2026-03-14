@@ -4,8 +4,23 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
+type DashboardModule = {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  bgColor: string;
+  path?: string;
+  comingSoon?: boolean;
+  accessKeywords: string[];
+};
+
 export default function Dashboard() {
   const [token, setToken] = useState('');
+  const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [userPermissions, setUserPermissions] = useState<string[]>([]);
+  const [isAdminUser, setIsAdminUser] = useState(false);
+  const [accessReady, setAccessReady] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -22,20 +37,165 @@ export default function Dashboard() {
     router.push('/');
   };
 
-  const modules = [
-    { name: 'HRM (Human Resource Management)', icon: '👥', color: 'from-red-500 to-pink-500', bgColor: 'from-red-50 to-pink-50' },
-    { name: 'Reports', icon: '📈', color: 'from-rose-500 to-red-500', bgColor: 'from-rose-50 to-red-50' },
-    { name: 'Settings & System Configuration', icon: '⚙️', color: 'from-slate-500 to-gray-500', bgColor: 'from-slate-50 to-gray-50' },
-    { name: 'Production', icon: '🏭', color: 'from-emerald-500 to-teal-500', bgColor: 'from-emerald-50 to-teal-50' },
-    { name: 'Purchasing', icon: '🛒', color: 'from-cyan-500 to-blue-500', bgColor: 'from-cyan-50 to-blue-50' },
-    { name: 'Outlets', icon: '🏪', color: 'from-violet-500 to-purple-500', bgColor: 'from-violet-50 to-purple-50' },
-    { name: 'Manage Stock', icon: '📦', color: 'from-orange-500 to-red-500', bgColor: 'from-orange-50 to-red-50' },
-    { name: 'Vehicle Loading', icon: '🚛', color: 'from-blue-500 to-indigo-500', bgColor: 'from-blue-50 to-indigo-50' },
-    { name: 'Distribution', icon: '🚚', color: 'from-green-500 to-teal-500', bgColor: 'from-green-50 to-teal-50' }
-    
+  useEffect(() => {
+    if (!token) return;
+
+    const fetchUserAccess = async () => {
+      try {
+        const userRes = await axios.get('http://localhost:8000/api/user', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const userData = userRes.data || {};
+        const employeeId = Number(userData?.employee_id || userData?.employee?.id || 0);
+        const roleNames = [
+          String(userData?.role || ''),
+          ...(Array.isArray(userData?.roles)
+            ? userData.roles.map((role: any) => String(role?.name || role || ''))
+            : []),
+        ]
+          .map((role) => role.trim().toLowerCase())
+          .filter(Boolean);
+
+        const permissionNames = Array.isArray(userData?.roles)
+          ? userData.roles.flatMap((role: any) =>
+              Array.isArray(role?.permissions)
+                ? role.permissions.map((permission: any) =>
+                    String(permission?.name || '').trim().toLowerCase()
+                  )
+                : []
+            )
+          : [];
+
+        const roleBlob = roleNames.join(' ');
+        const adminUser =
+          !employeeId ||
+          roleBlob.includes('super admin') ||
+          roleBlob.includes('superadmin') ||
+          roleBlob.includes('administrator') ||
+          roleBlob.includes('admin');
+
+        setUserRoles(Array.from(new Set(roleNames)));
+        setUserPermissions(Array.from(new Set(permissionNames.filter(Boolean))));
+        setIsAdminUser(adminUser);
+      } catch (error) {
+        console.error('Error fetching dashboard access profile:', error);
+        setUserRoles([]);
+        setUserPermissions([]);
+        setIsAdminUser(false);
+      } finally {
+        setAccessReady(true);
+      }
+    };
+
+    fetchUserAccess();
+  }, [token]);
+
+  const hasModuleAccess = (keywords: string[]) => {
+    if (isAdminUser) return true;
+    if (keywords.length === 0) return false;
+
+    return userPermissions.some((permission) => keywords.some((keyword) => permission.includes(keyword)));
+  };
+
+  const modules: DashboardModule[] = [
+    {
+      id: 'hrm',
+      name: 'HRM (Human Resource Management)',
+      icon: '👥',
+      color: 'from-red-500 to-pink-500',
+      bgColor: 'from-red-50 to-pink-50',
+      path: '/dashboard/hrm',
+      accessKeywords: ['hrm', 'employee', 'department', 'designation', 'attendance', 'leave', 'payroll', 'candidate', 'role', 'permission'],
+    },
+    {
+      id: 'reports',
+      name: 'Reports',
+      icon: '📈',
+      color: 'from-rose-500 to-red-500',
+      bgColor: 'from-rose-50 to-red-50',
+      comingSoon: true,
+      accessKeywords: ['report'],
+    },
+    {
+      id: 'settings',
+      name: 'Settings & System Configuration',
+      icon: '⚙️',
+      color: 'from-slate-500 to-gray-500',
+      bgColor: 'from-slate-50 to-gray-50',
+      comingSoon: true,
+      accessKeywords: ['setting', 'config', 'user', 'permission', 'role'],
+    },
+    {
+      id: 'production',
+      name: 'Production',
+      icon: '🏭',
+      color: 'from-emerald-500 to-teal-500',
+      bgColor: 'from-emerald-50 to-teal-50',
+      comingSoon: true,
+      accessKeywords: ['production'],
+    },
+    {
+      id: 'purchasing',
+      name: 'Purchasing',
+      icon: '🛒',
+      color: 'from-cyan-500 to-blue-500',
+      bgColor: 'from-cyan-50 to-blue-50',
+      path: '/dashboard/purchasing',
+      accessKeywords: ['purchasing', 'purchesing', 'purchase', 'grn'],
+    },
+    {
+      id: 'outlets',
+      name: 'Outlets',
+      icon: '🏪',
+      color: 'from-violet-500 to-purple-500',
+      bgColor: 'from-violet-50 to-purple-50',
+      path: '/dashboard/outlets',
+      accessKeywords: ['outlet', 'branch'],
+    },
+    {
+      id: 'stock',
+      name: 'Manage Stock',
+      icon: '📦',
+      color: 'from-orange-500 to-red-500',
+      bgColor: 'from-orange-50 to-red-50',
+      path: '/dashboard/stock',
+      accessKeywords: ['stock', 'inventory', 'supplier', 'transfer'],
+    },
+    {
+      id: 'vehicle-loading',
+      name: 'Vehicle Loading',
+      icon: '🚛',
+      color: 'from-blue-500 to-indigo-500',
+      bgColor: 'from-blue-50 to-indigo-50',
+      path: '/dashboard/vehicle-loading',
+      accessKeywords: ['vehicle-loading', 'vehicle', 'load', 'route'],
+    },
+    {
+      id: 'distribution',
+      name: 'Distribution',
+      icon: '🚚',
+      color: 'from-green-500 to-teal-500',
+      bgColor: 'from-green-50 to-teal-50',
+      path: '/dashboard/distribution',
+      accessKeywords: ['distribution', 'customer', 'invoice', 'return', 'payment'],
+    },
   ];
 
-  if (!token) {
+  const visibleModules = modules.filter((module) => hasModuleAccess(module.accessKeywords));
+
+  const handleModuleClick = (module: DashboardModule) => {
+    if (module.path) {
+      router.push(module.path);
+      return;
+    }
+
+    if (module.comingSoon) {
+      alert(`${module.name} module coming soon!`);
+    }
+  };
+
+  if (!token || !accessReady) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-red-50 via-pink-50 to-purple-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
@@ -111,27 +271,10 @@ export default function Dashboard() {
 
         {/* Module Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-16">
-          {modules.map((module, index) => (
+          {visibleModules.map((module, index) => (
             <div
               key={index}
-              onClick={() => {
-                if (module.name === 'HRM (Human Resource Management)') {
-                  router.push('/dashboard/hrm');
-                } else if (module.name === 'Manage Stock') {
-                  router.push('/dashboard/stock');
-                } else if (module.name === 'Vehicle Loading') {
-                  router.push('/dashboard/vehicle-loading');
-                } else if (module.name === 'Production') {
-                  // TODO: Implement Production module
-                  alert('Production module coming soon!');
-                } else if (module.name === 'Purchasing') {
-                  router.push('/dashboard/purchasing');
-                } else if (module.name === 'Outlets') {
-                  router.push('/dashboard/outlets');
-                } else if (module.name === 'Distribution') {
-                  router.push('/dashboard/distribution');
-                }
-              }}
+              onClick={() => handleModuleClick(module)}
               className={`group relative bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 cursor-pointer border border-white/20 overflow-hidden transform hover:-translate-y-2 hover:scale-105 ${
                 module.name === 'HRM (Human Resource Management)' ? 'ring-2 ring-red-500/50' : ''
               }`}
@@ -186,6 +329,12 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
+
+        {visibleModules.length === 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 mb-8">
+            No feature modules are currently assigned to your role. Contact an administrator to grant view permissions.
+          </div>
+        )}
 
         {/* Settings & Configuration Section */}
         <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
