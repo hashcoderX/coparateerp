@@ -120,6 +120,7 @@ const OFFLINE_INVOICE_STORAGE_KEY = 'distribution_offline_invoices';
 
 export default function DistributionInvoicesPage() {
   const [token, setToken] = useState('');
+  const [companyProfileName, setCompanyProfileName] = useState('Company');
   const [isAdmin, setIsAdmin] = useState(false);
   const [assignedRouteId, setAssignedRouteId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -212,6 +213,21 @@ export default function DistributionInvoicesPage() {
       fetchData();
     }
   }, [token]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('company_profile_data');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { name?: string };
+      const name = String(parsed?.name || '').trim();
+      if (name) {
+        setCompanyProfileName(name);
+      }
+    } catch (error) {
+      console.error('Failed to load company profile for print header:', error);
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -3106,7 +3122,7 @@ export default function DistributionInvoicesPage() {
         </div>
       )}
 
-      {/* POS 80mm thermal receipt print area for Pabasara Sweets */}
+      {/* POS 80mm thermal receipt print area */}
       {posPrintInvoice && (
         <div
           ref={posPrintRef}
@@ -3124,7 +3140,7 @@ export default function DistributionInvoicesPage() {
             }}
           >
             <div style={{ textAlign: 'center', marginBottom: '4px' }}>
-              <div style={{ fontSize: '14px', fontWeight: 700 }}>Pabasara Sweets</div>
+              <div style={{ fontSize: '14px', fontWeight: 700 }}>{companyProfileName}</div>
             </div>
 
             <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }}></div>

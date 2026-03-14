@@ -12,6 +12,7 @@ type DashboardModule = {
   bgColor: string;
   path?: string;
   comingSoon?: boolean;
+  adminOnly?: boolean;
   accessKeywords: string[];
 };
 
@@ -123,7 +124,8 @@ export default function Dashboard() {
       icon: '⚙️',
       color: 'from-slate-500 to-gray-500',
       bgColor: 'from-slate-50 to-gray-50',
-      comingSoon: true,
+      path: '/dashboard/company-settings',
+      adminOnly: true,
       accessKeywords: ['setting', 'config', 'user', 'permission', 'role'],
     },
     {
@@ -182,7 +184,10 @@ export default function Dashboard() {
     },
   ];
 
-  const visibleModules = modules.filter((module) => hasModuleAccess(module.accessKeywords));
+  const visibleModules = modules.filter((module) => {
+    if (module.adminOnly) return isAdminUser;
+    return hasModuleAccess(module.accessKeywords);
+  });
 
   const handleModuleClick = (module: DashboardModule) => {
     if (module.path) {
@@ -337,56 +342,68 @@ export default function Dashboard() {
         )}
 
         {/* Settings & Configuration Section */}
-        <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
-          <div className="bg-gradient-to-r from-red-500 to-pink-500 p-6">
-            <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl">
-                ⚙️
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-white">Settings & System Configuration</h3>
-                <p className="text-white/80">Configure and customize your system preferences</p>
+        {isAdminUser && (
+          <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
+            <div className="bg-gradient-to-r from-red-500 to-pink-500 p-6">
+              <div className="flex items-center space-x-3">
+                <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl">
+                  ⚙️
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white">Settings & System Configuration</h3>
+                  <p className="text-white/80">Configure and customize your system preferences</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[
-                { icon: '🏢', title: 'Company Settings', desc: 'Manage company information', color: 'from-blue-500 to-cyan-500' },
-                { icon: '👥', title: 'User Management', desc: 'Manage users and permissions', color: 'from-green-500 to-emerald-500' },
-                { icon: '⚙️', title: 'System Settings', desc: 'Configure system preferences', color: 'from-purple-500 to-indigo-500' },
-                { icon: '🔒', title: 'Security Settings', desc: 'Manage security configurations', color: 'from-red-500 to-pink-500' },
-                { icon: '📧', title: 'Email Settings', desc: 'Configure email notifications', color: 'from-yellow-500 to-orange-500' },
-                { icon: '💾', title: 'Backup & Restore', desc: 'Manage data backups', color: 'from-teal-500 to-green-500' },
-              ].map((setting, index) => (
-                <div
-                  key={index}
-                  className="group bg-white/50 hover:bg-white/80 rounded-xl p-4 border border-white/30 hover:border-white/50 transition-all duration-300 cursor-pointer transform hover:scale-105"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-12 h-12 bg-gradient-to-r ${setting.color} rounded-lg flex items-center justify-center text-xl shadow-lg group-hover:scale-110 transition-transform duration-300`}>
-                      {setting.icon}
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900 group-hover:text-gray-800 transition-colors duration-300">
-                        {setting.title}
-                      </h4>
-                      <p className="text-sm text-gray-600 group-hover:text-gray-700 transition-colors duration-300">
-                        {setting.desc}
-                      </p>
-                    </div>
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[
+                  { icon: '🏢', title: 'Company Settings', desc: 'Manage company profile for invoices and documents', color: 'from-blue-500 to-cyan-500', path: '/dashboard/company-settings' },
+                  { icon: '👥', title: 'User Management', desc: 'Manage users and permissions', color: 'from-green-500 to-emerald-500', comingSoon: true },
+                  { icon: '⚙️', title: 'System Settings', desc: 'Configure system preferences', color: 'from-purple-500 to-indigo-500', comingSoon: true },
+                  { icon: '🔒', title: 'Security Settings', desc: 'Manage security configurations', color: 'from-red-500 to-pink-500', comingSoon: true },
+                  { icon: '📧', title: 'Email Settings', desc: 'Configure email notifications', color: 'from-yellow-500 to-orange-500', comingSoon: true },
+                  { icon: '💾', title: 'Backup & Restore', desc: 'Manage data backups', color: 'from-teal-500 to-green-500', comingSoon: true },
+                ].map((setting, index) => (
+                  <div
+                    key={index}
+                    onClick={() => {
+                      if (setting.path) {
+                        router.push(setting.path);
+                        return;
+                      }
+
+                      if (setting.comingSoon) {
+                        alert(`${setting.title} section coming soon!`);
+                      }
+                    }}
+                    className="group bg-white/50 hover:bg-white/80 rounded-xl p-4 border border-white/30 hover:border-white/50 transition-all duration-300 cursor-pointer transform hover:scale-105"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-12 h-12 bg-gradient-to-r ${setting.color} rounded-lg flex items-center justify-center text-xl shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                        {setting.icon}
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-gray-900 group-hover:text-gray-800 transition-colors duration-300">
+                          {setting.title}
+                        </h4>
+                        <p className="text-sm text-gray-600 group-hover:text-gray-700 transition-colors duration-300">
+                          {setting.desc}
+                        </p>
+                      </div>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </main>
     </div>
   );
