@@ -76,6 +76,12 @@ export default function Dashboard() {
           roleBlob.includes('administrator') ||
           roleBlob.includes('admin');
 
+        const isOutletUser = roleNames.some((role) => role.includes('outlet_user'));
+        if (!adminUser && isOutletUser) {
+          router.push('/outlet-pos');
+          return;
+        }
+
         setUserRoles(Array.from(new Set(roleNames)));
         setUserPermissions(Array.from(new Set(permissionNames.filter(Boolean))));
         setIsAdminUser(adminUser);
@@ -90,7 +96,7 @@ export default function Dashboard() {
     };
 
     fetchUserAccess();
-  }, [token]);
+  }, [token, router]);
 
   const hasModuleAccess = (keywords: string[]) => {
     if (isAdminUser) return true;
@@ -115,7 +121,7 @@ export default function Dashboard() {
       icon: '📈',
       color: 'from-rose-500 to-red-500',
       bgColor: 'from-rose-50 to-red-50',
-      comingSoon: true,
+      path: '/dashboard/reports',
       accessKeywords: ['report'],
     },
     {
@@ -134,8 +140,8 @@ export default function Dashboard() {
       icon: '🏭',
       color: 'from-emerald-500 to-teal-500',
       bgColor: 'from-emerald-50 to-teal-50',
-      comingSoon: true,
-      accessKeywords: ['production'],
+      path: '/dashboard/production',
+      accessKeywords: ['production', 'bom', 'formula', 'batch', 'planning', 'quality', 'qc', 'packaging'],
     },
     {
       id: 'purchasing',
@@ -360,11 +366,10 @@ export default function Dashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {[
                   { icon: '🏢', title: 'Company Settings', desc: 'Manage company profile for invoices and documents', color: 'from-blue-500 to-cyan-500', path: '/dashboard/company-settings' },
-                  { icon: '👥', title: 'User Management', desc: 'Manage users and permissions', color: 'from-green-500 to-emerald-500', comingSoon: true },
-                  { icon: '⚙️', title: 'System Settings', desc: 'Configure system preferences', color: 'from-purple-500 to-indigo-500', comingSoon: true },
-                  { icon: '🔒', title: 'Security Settings', desc: 'Manage security configurations', color: 'from-red-500 to-pink-500', comingSoon: true },
-                  { icon: '📧', title: 'Email Settings', desc: 'Configure email notifications', color: 'from-yellow-500 to-orange-500', comingSoon: true },
-                  { icon: '💾', title: 'Backup & Restore', desc: 'Manage data backups', color: 'from-teal-500 to-green-500', comingSoon: true },
+                  { icon: '👥', title: 'User Management', desc: 'Manage users and permissions', color: 'from-green-500 to-emerald-500', path: '/dashboard/hrm/roles' },
+                  { icon: '⚙️', title: 'System Settings', desc: 'Configure system preferences', color: 'from-purple-500 to-indigo-500', path: '/dashboard/system-settings' },
+                  { icon: '🔒', title: 'Security Settings', desc: 'Manage security configurations', color: 'from-red-500 to-pink-500', path: '/dashboard/security-settings' },
+                  { icon: '💾', title: 'Backup & Restore', desc: 'Manage data backups', color: 'from-teal-500 to-green-500', path: '/dashboard/backup-restore' },
                 ].map((setting, index) => (
                   <div
                     key={index}
@@ -374,9 +379,7 @@ export default function Dashboard() {
                         return;
                       }
 
-                      if (setting.comingSoon) {
-                        alert(`${setting.title} section coming soon!`);
-                      }
+                      
                     }}
                     className="group bg-white/50 hover:bg-white/80 rounded-xl p-4 border border-white/30 hover:border-white/50 transition-all duration-300 cursor-pointer transform hover:scale-105"
                   >

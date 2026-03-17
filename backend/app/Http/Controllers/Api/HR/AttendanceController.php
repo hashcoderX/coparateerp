@@ -8,6 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Carbon\Carbon;
 use App\Models\Employee;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class AttendanceController extends Controller
 {
@@ -196,8 +198,8 @@ class AttendanceController extends Controller
 
             // Ensure branch_id exists, default to first available company
             $branchId = $employee->branch_id;
-            if (!$branchId || !\DB::table('companies')->where('id', $branchId)->exists()) {
-                $firstCompany = \DB::table('companies')->first();
+            if (!$branchId || !DB::table('companies')->where('id', $branchId)->exists()) {
+                $firstCompany = DB::table('companies')->first();
                 if ($firstCompany) {
                     $branchId = $firstCompany->id;
                 } else {
@@ -410,7 +412,7 @@ class AttendanceController extends Controller
                 ->first();
 
             if (!$attendance) {
-                \Log::info('Mark out failed: No attendance record found', [
+                Log::info('Mark out failed: No attendance record found', [
                     'employee_id' => $employee->id,
                     'date' => $date,
                     'validated' => $validated
@@ -422,7 +424,7 @@ class AttendanceController extends Controller
             }
 
             if ($attendance->out_time) {
-                \Log::info('Mark out failed: Already marked out', [
+                Log::info('Mark out failed: Already marked out', [
                     'attendance_id' => $attendance->id,
                     'existing_out_time' => $attendance->out_time
                 ]);
@@ -457,7 +459,7 @@ class AttendanceController extends Controller
             try {
                 $attendance->save();
             } catch (\Exception $e) {
-                \Log::error('Mark out save failed', [
+                Log::error('Mark out save failed', [
                     'attendance_id' => $attendance->id,
                     'error' => $e->getMessage()
                 ]);

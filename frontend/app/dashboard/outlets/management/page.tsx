@@ -22,6 +22,32 @@ interface Outlet {
   updated_at: string;
 }
 
+interface OutletStockLine {
+  inventory_item_id: number;
+  name: string;
+  code: string;
+  unit: string;
+  available_quantity: number;
+}
+
+interface OutletSalesItemWise {
+  inventory_item_id: number;
+  item_code: string;
+  item_name: string;
+  unit: string;
+  total_qty: number;
+  total_amount: number;
+}
+
+interface OutletSaleRecord {
+  id: number;
+  sale_number: string;
+  sale_date: string;
+  customer_name: string | null;
+  total_quantity: number;
+  total_amount: number;
+}
+
 export default function OutletManagementPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -29,6 +55,16 @@ export default function OutletManagementPage() {
   const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingOutlet, setEditingOutlet] = useState<Outlet | null>(null);
+  const [selectedOutlet, setSelectedOutlet] = useState<Outlet | null>(null);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockLines, setStockLines] = useState<OutletStockLine[]>([]);
+  const [salesModalOpen, setSalesModalOpen] = useState(false);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesTotals, setSalesTotals] = useState({ total_sales: 0, total_quantity: 0, total_amount: 0 });
+  const [salesRecords, setSalesRecords] = useState<OutletSaleRecord[]>([]);
+  const [itemWiseSales, setItemWiseSales] = useState<OutletSalesItemWise[]>([]);
+  const [origin, setOrigin] = useState('');
   const router = useRouter();
 
   const [formData, setFormData] = useState({
@@ -58,6 +94,12 @@ export default function OutletManagementPage() {
       fetchOutlets();
     }
   }, [token]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin);
+    }
+  }, []);
 
   const fetchOutlets = async () => {
     try {
@@ -133,9 +175,13 @@ export default function OutletManagementPage() {
           headers: { Authorization: `Bearer ${token}` }
         });
       } else {
-        await axios.post('http://localhost:8000/api/outlets', formData, {
+        const createRes = await axios.post('http://localhost:8000/api/outlets', formData, {
           headers: { Authorization: `Bearer ${token}` }
         });
+
+        const createdOutlet = createRes?.data?.data;
+        const posLink = `${window.location.origin}/outlet-pos?outlet_code=${encodeURIComponent(createdOutlet?.code || formData.code)}`;
+        alert(`Outlet created successfully. POS Link: ${posLink}\nOutlet POS Login Email: ${formData.outlet_user_email}`);
       }
 
       setShowModal(false);
@@ -162,6 +208,50 @@ export default function OutletManagementPage() {
     } catch (error: any) {
       console.error('Error deleting outlet:', error);
       alert(error?.response?.data?.message || 'Failed to delete outlet');
+    }
+  };
+
+  const openStoreReport = async (outlet: Outlet) => {
+    try {
+      setSelectedOutlet(outlet);
+      setStockModalOpen(true);
+      setStockLoading(true);
+
+      const response = await axios.get(`http://localhost:8000/api/outlets/${outlet.id}/stock-report`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const lines = response.data?.success ? (response.data?.data?.stocks || []) : [];
+      setStockLines(lines);
+    } catch (error) {
+      console.error('Error fetching outlet store report:', error);
+      setStockLines([]);
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  const openSalesRecords = async (outlet: Outlet) => {
+    try {
+      setSelectedOutlet(outlet);
+      setSalesModalOpen(true);
+      setSalesLoading(true);
+
+      const response = await axios.get(`http://localhost:8000/api/outlet-pos/outlets/${outlet.id}/sales-report`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = response.data?.data || {};
+      setSalesTotals(data?.totals || { total_sales: 0, total_quantity: 0, total_amount: 0 });
+      setSalesRecords(data?.sales || []);
+      setItemWiseSales(data?.item_wise || []);
+    } catch (error) {
+      console.error('Error fetching outlet sales records:', error);
+      setSalesTotals({ total_sales: 0, total_quantity: 0, total_amount: 0 });
+      setSalesRecords([]);
+      setItemWiseSales([]);
+    } finally {
+      setSalesLoading(false);
     }
   };
 
@@ -217,6 +307,12 @@ export default function OutletManagementPage() {
               Outlets Home
             </button>
             <button
+              onClick={() => router.push('/dashboard/outlets/sales')}
+              className="px-4 py-2 border border-indigo-300 rounded-md text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+            >
+              Outlet Sales Tracking
+            </button>
+            <button
               onClick={openCreate}
               className="px-4 py-2 bg-violet-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-violet-700"
             >
@@ -234,6 +330,7 @@ export default function OutletManagementPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Manager</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Outlet User</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS Access</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -242,7 +339,7 @@ export default function OutletManagementPage() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {outlets.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-500">
+                    <td colSpan={8} className="px-6 py-10 text-center text-sm text-gray-500">
                       No outlets found.
                     </td>
                   </tr>
@@ -253,6 +350,32 @@ export default function OutletManagementPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{outlet.code}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{outlet.manager_name || '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{outlet.user?.email || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => window.open(`/outlet-pos?outlet_code=${encodeURIComponent(outlet.code)}`, '_blank')}
+                            className="px-2 py-1 text-xs rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                          >
+                            Open POS
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const posLink = `${origin}/outlet-pos?outlet_code=${encodeURIComponent(outlet.code)}`;
+                              try {
+                                await navigator.clipboard.writeText(posLink);
+                                alert(`POS link copied for ${outlet.name}`);
+                              } catch {
+                                alert(posLink);
+                              }
+                            }}
+                            className="px-2 py-1 text-xs rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200"
+                          >
+                            Copy Link
+                          </button>
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{outlet.phone || '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -263,6 +386,18 @@ export default function OutletManagementPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => router.push(`/dashboard/outlets/store/${outlet.id}`)}
+                            className="text-violet-700 hover:text-violet-900 bg-violet-50 hover:bg-violet-100 px-3 py-1 rounded-md text-sm font-medium"
+                          >
+                            View Store
+                          </button>
+                          <button
+                            onClick={() => router.push(`/dashboard/outlets/sales/${outlet.id}`)}
+                            className="text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-md text-sm font-medium"
+                          >
+                            Sales Records
+                          </button>
                           <button
                             onClick={() => openEdit(outlet)}
                             className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-sm font-medium"
@@ -424,6 +559,162 @@ export default function OutletManagementPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {stockModalOpen && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Outlet Store - {selectedOutlet?.name}
+              </h3>
+              <button
+                onClick={() => {
+                  setStockModalOpen(false);
+                  setStockLines([]);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <span className="text-2xl">&times;</span>
+              </button>
+            </div>
+
+            {stockLoading ? (
+              <div className="py-8 text-center text-gray-500">Loading outlet store...</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Available Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {stockLines.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-500">No stock in this outlet store.</td>
+                      </tr>
+                    ) : (
+                      stockLines.map((line) => (
+                        <tr key={line.inventory_item_id}>
+                          <td className="px-4 py-2 text-sm text-gray-800">{line.name}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">{line.code}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">{line.unit}</td>
+                          <td className="px-4 py-2 text-sm text-right text-gray-900 font-semibold">{Number(line.available_quantity || 0).toFixed(2)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {salesModalOpen && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-5 border w-11/12 max-w-6xl shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Sales Records - {selectedOutlet?.name}
+              </h3>
+              <button
+                onClick={() => {
+                  setSalesModalOpen(false);
+                  setSalesRecords([]);
+                  setItemWiseSales([]);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <span className="text-2xl">&times;</span>
+              </button>
+            </div>
+
+            {salesLoading ? (
+              <div className="py-8 text-center text-gray-500">Loading sales records...</div>
+            ) : (
+              <div className="space-y-5">
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-black flex flex-wrap gap-4">
+                  <span>Total Sales: <strong>{Number(salesTotals.total_sales || 0)}</strong></span>
+                  <span>Total Sales Qty: <strong>{Number(salesTotals.total_quantity || 0).toFixed(2)}</strong></span>
+                  <span>Total Sales Amount: <strong>{Number(salesTotals.total_amount || 0).toFixed(2)}</strong></span>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-800 mb-2">Item-wise Sales Qty</h4>
+                  <div className="overflow-x-auto border border-gray-200 rounded-md">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sales Qty</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sales Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100">
+                        {itemWiseSales.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-6 text-center text-sm text-gray-500">No item-wise sales yet.</td>
+                          </tr>
+                        ) : (
+                          itemWiseSales.map((line) => (
+                            <tr key={`${line.inventory_item_id}-${line.item_code}`}>
+                              <td className="px-4 py-2 text-sm text-gray-800">{line.item_name}</td>
+                              <td className="px-4 py-2 text-sm text-gray-700">{line.item_code}</td>
+                              <td className="px-4 py-2 text-sm text-gray-700">{line.unit || '-'}</td>
+                              <td className="px-4 py-2 text-sm text-right text-gray-900 font-semibold">{Number(line.total_qty || 0).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-sm text-right text-gray-900 font-semibold">{Number(line.total_amount || 0).toFixed(2)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-800 mb-2">Sales History</h4>
+                  <div className="overflow-x-auto border border-gray-200 rounded-md">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sale #</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100">
+                        {salesRecords.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-6 text-center text-sm text-gray-500">No sales records found.</td>
+                          </tr>
+                        ) : (
+                          salesRecords.map((record) => (
+                            <tr key={record.id}>
+                              <td className="px-4 py-2 text-sm text-gray-800">{record.sale_number}</td>
+                              <td className="px-4 py-2 text-sm text-gray-700">{new Date(record.sale_date).toLocaleString()}</td>
+                              <td className="px-4 py-2 text-sm text-gray-700">{record.customer_name || '-'}</td>
+                              <td className="px-4 py-2 text-sm text-right text-gray-900 font-semibold">{Number(record.total_quantity || 0).toFixed(2)}</td>
+                              <td className="px-4 py-2 text-sm text-right text-gray-900 font-semibold">{Number(record.total_amount || 0).toFixed(2)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

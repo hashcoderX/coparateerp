@@ -117,10 +117,37 @@ interface LoadOption {
 }
 
 const OFFLINE_INVOICE_STORAGE_KEY = 'distribution_offline_invoices';
+const COMPANY_PROFILE_ID_KEY = 'company_profile_id';
+
+const normalizeCompanyLogoUrl = (rawUrl?: string, rawPath?: string): string => {
+  const logoPath = String(rawPath || '').trim();
+  if (logoPath) {
+    return `http://localhost:8000/storage/${logoPath.replace(/^\/+/, '')}`;
+  }
+
+  const url = String(rawUrl || '').trim();
+  if (!url) return '';
+
+  if (url.startsWith('/storage/')) {
+    return `http://localhost:8000${url}`;
+  }
+
+  if (url.startsWith('http://localhost/storage/') || url.startsWith('https://localhost/storage/')) {
+    return url.replace('http://localhost/storage/', 'http://localhost:8000/storage/')
+      .replace('https://localhost/storage/', 'http://localhost:8000/storage/');
+  }
+
+  return url;
+};
 
 export default function DistributionInvoicesPage() {
   const [token, setToken] = useState('');
   const [companyProfileName, setCompanyProfileName] = useState('Company');
+  const [companyProfileLogoUrl, setCompanyProfileLogoUrl] = useState('');
+  const [companyProfileAddress, setCompanyProfileAddress] = useState('');
+  const [companyProfilePhone, setCompanyProfilePhone] = useState('');
+  const [companyProfileEmail, setCompanyProfileEmail] = useState('');
+  const [companyProfileWebsite, setCompanyProfileWebsite] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [assignedRouteId, setAssignedRouteId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -219,15 +246,83 @@ export default function DistributionInvoicesPage() {
     try {
       const raw = window.localStorage.getItem('company_profile_data');
       if (!raw) return;
-      const parsed = JSON.parse(raw) as { name?: string };
+      const parsed = JSON.parse(raw) as {
+        name?: string;
+        logo_url?: string;
+        logo_path?: string;
+        address?: string;
+        phone?: string;
+        email?: string;
+        website?: string;
+      };
       const name = String(parsed?.name || '').trim();
       if (name) {
         setCompanyProfileName(name);
+      }
+
+      setCompanyProfileAddress(String(parsed?.address || '').trim());
+      setCompanyProfilePhone(String(parsed?.phone || '').trim());
+      setCompanyProfileEmail(String(parsed?.email || '').trim());
+      setCompanyProfileWebsite(String(parsed?.website || '').trim());
+
+      const normalizedLogoUrl = normalizeCompanyLogoUrl(parsed?.logo_url, parsed?.logo_path);
+      if (normalizedLogoUrl) {
+        setCompanyProfileLogoUrl(normalizedLogoUrl);
       }
     } catch (error) {
       console.error('Failed to load company profile for print header:', error);
     }
   }, []);
+
+  useEffect(() => {
+    if (!token || typeof window === 'undefined') return;
+
+    const hydrateCompanyHeader = async () => {
+      try {
+        const profileId = Number(window.localStorage.getItem(COMPANY_PROFILE_ID_KEY) || 0);
+        if (profileId <= 0) return;
+
+        const res = await axios.get(`http://localhost:8000/api/companies/${profileId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const company = (res?.data || {}) as {
+          name?: string;
+          logo_url?: string;
+          logo_path?: string;
+          address?: string;
+          phone?: string;
+          email?: string;
+          website?: string;
+        };
+
+        const latestName = String(company?.name || '').trim();
+        if (latestName) {
+          setCompanyProfileName(latestName);
+        }
+
+        const latestLogoUrl = normalizeCompanyLogoUrl(company?.logo_url, company?.logo_path);
+        setCompanyProfileLogoUrl(latestLogoUrl);
+        setCompanyProfileAddress(String(company?.address || '').trim());
+        setCompanyProfilePhone(String(company?.phone || '').trim());
+        setCompanyProfileEmail(String(company?.email || '').trim());
+        setCompanyProfileWebsite(String(company?.website || '').trim());
+
+        const currentRaw = window.localStorage.getItem('company_profile_data');
+        const current = currentRaw ? JSON.parse(currentRaw) : {};
+        const merged = {
+          ...current,
+          ...company,
+          logo_url: latestLogoUrl,
+        };
+        window.localStorage.setItem('company_profile_data', JSON.stringify(merged));
+      } catch (error) {
+        console.error('Failed to refresh company profile for print header:', error);
+      }
+    };
+
+    hydrateCompanyHeader();
+  }, [token]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1473,15 +1568,21 @@ export default function DistributionInvoicesPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm border-b border-gray-200">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 distribution-invoices-page relative overflow-hidden">
+      <div className="absolute inset-0 opacity-40 pointer-events-none">
+        <div className="absolute -top-10 -left-16 w-72 h-72 bg-emerald-200/60 rounded-full blur-3xl"></div>
+        <div className="absolute top-24 right-0 w-80 h-80 bg-teal-200/50 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-0 left-1/3 w-80 h-80 bg-cyan-200/50 rounded-full blur-3xl"></div>
+      </div>
+
+      <nav className="relative z-10 bg-white/80 backdrop-blur-md shadow-sm border-b border-white/60">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 h-auto">
             <div className="flex items-center justify-between sm:justify-start gap-3">
@@ -1498,7 +1599,7 @@ export default function DistributionInvoicesPage() {
             <div className="flex justify-start sm:justify-end">
               <button
                 onClick={() => router.push('/dashboard')}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Back to Dashboard
               </button>
@@ -1507,10 +1608,12 @@ export default function DistributionInvoicesPage() {
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+      <div className="relative z-10 max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">Invoices</h1>
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">
+              Invoices <span className="bg-gradient-to-r from-emerald-600 to-cyan-600 bg-clip-text text-transparent">Control Hub</span>
+            </h1>
             <p className="mt-2 text-sm sm:text-base md:text-lg text-gray-600">
               Create and track distribution invoices.
             </p>
@@ -1521,26 +1624,26 @@ export default function DistributionInvoicesPage() {
           <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
             <button
               onClick={() => router.back()}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 w-full sm:w-auto"
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 w-full sm:w-auto transition-colors"
             >
               Back
             </button>
             <button
               onClick={() => router.push('/dashboard/distribution')}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 w-full sm:w-auto"
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 w-full sm:w-auto transition-colors"
             >
               Distribution Home
             </button>
             <button
               onClick={openCreate}
-              className="px-4 py-2 bg-green-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-green-700 w-full sm:w-auto"
+              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 border border-transparent rounded-md text-sm font-semibold text-white hover:from-emerald-700 hover:to-teal-700 w-full sm:w-auto shadow-lg shadow-emerald-200/50 transition-all"
             >
               Add Invoice
             </button>
           </div>
         </div>
 
-        <div className="mb-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
+        <div className="mb-4 rounded-xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-lg p-3 sm:p-4">
           <div className="mb-2 flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-gray-800">Advanced Search</h3>
             <button
@@ -1614,10 +1717,10 @@ export default function DistributionInvoicesPage() {
           </div>
         </div>
 
-        <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+        <div className="rounded-xl border border-white/70 bg-white/90 backdrop-blur-lg shadow-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+              <thead className="bg-gradient-to-r from-emerald-50 to-cyan-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Invoice</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
@@ -1634,7 +1737,7 @@ export default function DistributionInvoicesPage() {
                   </tr>
                 ) : (
                   pagedInvoices.map((invoice) => (
-                    <tr key={invoice.id} className="hover:bg-gray-50">
+                    <tr key={invoice.id} className="hover:bg-emerald-50/50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{invoice.invoice_number}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{invoice.customer?.shop_name || '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{new Date(invoice.invoice_date).toLocaleDateString()}</td>
@@ -2963,9 +3066,9 @@ export default function DistributionInvoicesPage() {
       )}
 
       {viewInvoice && (
-        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-11/12 md:w-[640px] max-h-[90vh] overflow-hidden flex flex-col border border-gray-200">
-            <div className="flex items-start justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white/95 rounded-2xl shadow-2xl max-w-2xl w-11/12 md:w-[680px] max-h-[90vh] overflow-hidden flex flex-col border border-white/70">
+            <div className="flex items-start justify-between px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-cyan-50">
               <div>
                 <h3 className="text-base font-semibold text-gray-900">Invoice {viewInvoice.invoice_number}</h3>
                 <p className="text-xs text-gray-500">
@@ -2996,32 +3099,48 @@ export default function DistributionInvoicesPage() {
                 </div>
               </div>
 
-              <div className="border border-gray-200 rounded-lg overflow-hidden mt-1">
-                <div className="bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600">Items</div>
-                <div className="divide-y divide-gray-100">
-                  {viewInvoice.items.map((item) => {
-                    const qty = Number(item.quantity) || 0;
-                    const unitPrice = Number(item.unit_price) || 0;
-                    const lineTotal = qty * unitPrice;
-                    return (
-                      <div key={item.id} className="px-3 py-2 text-xs sm:text-sm">
-                        <div className="flex justify-between">
-                          <div className="font-medium text-gray-800">{item.item_name}</div>
-                          <div className="text-gray-500">{item.item_code}</div>
-                        </div>
-                        <div className="mt-0.5 flex justify-between text-gray-600">
-                          <span>
-                            {qty.toFixed(2)} x {unitPrice.toFixed(2)}
-                          </span>
-                          <span className="font-semibold text-gray-900">{lineTotal.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {viewInvoice.items.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-gray-500">No items recorded on this invoice.</div>
-                  )}
+              <div className="border border-gray-200 rounded-xl overflow-hidden mt-1 bg-white shadow-sm">
+                <div className="bg-gradient-to-r from-emerald-50 to-cyan-50 px-3 py-2 text-xs font-semibold text-gray-700 flex items-center justify-between">
+                  <span>Invoice Items Preview</span>
+                  <span className="inline-flex items-center rounded-full bg-white border border-emerald-200 px-2 py-0.5 text-[11px] text-emerald-700">
+                    {viewInvoice.items.length} item(s)
+                  </span>
                 </div>
+
+                {viewInvoice.items.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-gray-500">No items recorded on this invoice.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs sm:text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold">Item</th>
+                          <th className="px-3 py-2 text-left font-semibold">Code</th>
+                          <th className="px-3 py-2 text-right font-semibold">Qty</th>
+                          <th className="px-3 py-2 text-right font-semibold">Price</th>
+                          <th className="px-3 py-2 text-right font-semibold">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {viewInvoice.items.map((item, index) => {
+                          const qty = Number(item.quantity) || 0;
+                          const unitPrice = Number(item.unit_price) || 0;
+                          const lineTotal = qty * unitPrice;
+
+                          return (
+                            <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
+                              <td className="px-3 py-2 font-medium text-gray-800">{item.item_name}</td>
+                              <td className="px-3 py-2 text-gray-600">{item.item_code}</td>
+                              <td className="px-3 py-2 text-right text-gray-700">{qty.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right text-gray-700">{unitPrice.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-gray-900">{lineTotal.toFixed(2)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               {(() => {
@@ -3131,7 +3250,8 @@ export default function DistributionInvoicesPage() {
         >
           <div
             style={{
-              width: '100%',
+              width: '80mm',
+              minWidth: '80mm',
               maxWidth: '80mm',
               padding: '4px 6px',
               boxSizing: 'border-box',
@@ -3140,7 +3260,34 @@ export default function DistributionInvoicesPage() {
             }}
           >
             <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+              {companyProfileLogoUrl && (
+                <div style={{ marginBottom: '4px' }}>
+                  <img
+                    src={companyProfileLogoUrl}
+                    alt="Company logo"
+                    style={{
+                      maxWidth: '26mm',
+                      maxHeight: '16mm',
+                      objectFit: 'contain',
+                      margin: '0 auto',
+                      display: 'block',
+                    }}
+                  />
+                </div>
+              )}
               <div style={{ fontSize: '14px', fontWeight: 700 }}>{companyProfileName}</div>
+              {companyProfileAddress && (
+                <div style={{ fontSize: '10px', lineHeight: 1.25, marginTop: '2px' }}>{companyProfileAddress}</div>
+              )}
+              {companyProfilePhone && (
+                <div style={{ fontSize: '10px', lineHeight: 1.25 }}>Tel: {companyProfilePhone}</div>
+              )}
+              {companyProfileEmail && (
+                <div style={{ fontSize: '10px', lineHeight: 1.25 }}>{companyProfileEmail}</div>
+              )}
+              {companyProfileWebsite && (
+                <div style={{ fontSize: '10px', lineHeight: 1.25 }}>{companyProfileWebsite}</div>
+              )}
             </div>
 
             <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }}></div>
@@ -3301,18 +3448,41 @@ export default function DistributionInvoicesPage() {
       )}
 
       <style jsx global>{`
+        @page {
+          size: 80mm auto;
+          margin: 0;
+        }
+
         @media print {
-          body * {
-            visibility: hidden;
+          html,
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 80mm !important;
+            height: auto !important;
+            overflow: visible !important;
           }
-          .pos-print-area, .pos-print-area * {
-            visibility: visible;
+
+          .distribution-invoices-page > * {
+            display: none !important;
           }
+
           .pos-print-area {
+            display: block !important;
             position: static !important;
             left: 0 !important;
             top: 0 !important;
-            margin: 0 auto !important;
+            width: 80mm !important;
+            min-width: 80mm !important;
+            max-width: 80mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          .pos-print-area * {
+            visibility: visible !important;
           }
         }
       `}</style>

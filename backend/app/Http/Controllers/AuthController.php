@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\SystemSetting;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -10,6 +11,28 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    private function isAdminUser(User $user): bool
+    {
+        if (!$user->employee_id) {
+            return true;
+        }
+
+        $user->loadMissing('roles');
+
+        $roleNames = $user->roles
+            ->pluck('name')
+            ->push((string) ($user->role ?? ''))
+            ->map(fn ($name) => strtolower(trim((string) $name)))
+            ->filter();
+
+        return $roleNames->contains(function ($roleName) {
+            return str_contains($roleName, 'super admin')
+                || str_contains($roleName, 'superadmin')
+                || str_contains($roleName, 'administrator')
+                || $roleName === 'admin';
+        });
+    }
+
     public function register(Request $request)
     {
         $request->validate([
@@ -46,6 +69,29 @@ class AuthController extends Controller
         }
 
         $user = Auth::user();
+
+        if (!$user instanceof User) {
+            throw ValidationException::withMessages([
+                'email' => ['Unable to authenticate user.'],
+            ]);
+        }
+
+        $systemSetting = SystemSetting::firstOrCreate(
+            ['key' => 'system_enabled'],
+            ['value' => '1']
+        );
+
+        $systemEnabled = filter_var($systemSetting->value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $systemEnabled = $systemEnabled ?? ($systemSetting->value === '1');
+
+        if (!$systemEnabled && !$this->isAdminUser($user)) {
+            Auth::logout();
+
+            throw ValidationException::withMessages([
+                'email' => ['System is currently disabled. Please contact your administrator.'],
+            ]);
+        }
+
         $token = $user->createToken('API Token')->plainTextToken;
 
         return response()->json([

@@ -21,6 +21,15 @@ interface InventoryItem {
   location: string;
   expiry_date: string | null;
   status: 'active' | 'inactive';
+  additional_info?: {
+    store_tag?: string;
+    stock_source?: string;
+    last_packaging_batch_id?: number;
+    last_label_code?: string;
+    last_barcode_value?: string;
+    last_qr_value?: string;
+    last_synced_at?: string;
+  };
   supplier?: {
     id: number;
     name: string;
@@ -304,6 +313,11 @@ export default function Inventory() {
     return { status: 'In Stock', color: 'bg-green-100 text-green-800' };
   };
 
+  const modalLabelClass = 'block text-xs font-semibold uppercase tracking-wide text-gray-600';
+  const modalInputClass = 'mt-1.5 block w-full rounded-xl border border-orange-100 bg-gradient-to-b from-white to-orange-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 placeholder:text-gray-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
+  const modalSelectClass = 'mt-1.5 block w-full rounded-xl border border-orange-100 bg-gradient-to-b from-white to-orange-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
+  const modalTextareaClass = 'mt-1.5 block w-full rounded-xl border border-orange-100 bg-gradient-to-b from-white to-orange-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 placeholder:text-gray-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
+
   if (!token) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -485,6 +499,9 @@ export default function Inventory() {
                       Stock Info
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Batch
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Price
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -532,6 +549,28 @@ export default function Inventory() {
                             </div>
                           )}
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {item.additional_info?.last_label_code || '-'}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2">
+                            {item.additional_info?.store_tag && (
+                              <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
+                                {item.additional_info.store_tag.replace('_', ' ').toUpperCase()}
+                              </span>
+                            )}
+                            {item.additional_info?.stock_source && (
+                              <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-purple-100 text-purple-800">
+                                {item.additional_info.stock_source.toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          {item.additional_info?.last_packaging_batch_id && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              Batch #{item.additional_info.last_packaging_batch_id}
+                            </div>
+                          )}
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           LKR {item.unit_price.toFixed(2)}
                         </td>
@@ -566,16 +605,16 @@ export default function Inventory() {
 
       {/* Add/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-4/5 lg:w-2/3 shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-sm overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-0 border border-orange-100 w-11/12 md:w-4/5 lg:w-2/3 shadow-2xl rounded-2xl bg-white/95 max-h-[90vh] overflow-y-auto">
             <div className="mt-3">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">
+              <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-orange-100 bg-gradient-to-r from-orange-50 via-amber-50 to-white backdrop-blur-sm">
+                <h3 className="text-lg font-semibold text-gray-900">
                   {editingItem ? 'Edit Item' : `Add Item to ${activeTab === 'raw_material' ? 'Raw Material Store' : 'Finished Goods Store'}`}
                 </h3>
                 <button
                   onClick={() => setShowModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-gray-400 hover:text-orange-600 transition-colors duration-200"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -583,10 +622,10 @@ export default function Inventory() {
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Item Name *
                     </label>
                     <input
@@ -594,13 +633,13 @@ export default function Inventory() {
                       required
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                      className={modalInputClass}
                       placeholder="Enter item name"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Item Code/SKU *
                     </label>
                     <input
@@ -608,33 +647,33 @@ export default function Inventory() {
                       required
                       value={formData.code}
                       onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                      className={modalInputClass}
                       placeholder="Enter unique code"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Category
                     </label>
                     <input
                       type="text"
                       value={formData.category}
                       onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                      className={modalInputClass}
                       placeholder="Enter category"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Unit *
                     </label>
                     <select
                       required
                       value={formData.unit}
                       onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900"
+                      className={modalSelectClass}
                     >
                       <option value="">Select unit</option>
                       <option value="pieces">Pieces</option>
@@ -650,7 +689,7 @@ export default function Inventory() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Current Stock *
                     </label>
                     <input
@@ -660,13 +699,13 @@ export default function Inventory() {
                       required
                       value={formData.current_stock}
                       onChange={(e) => setFormData({ ...formData, current_stock: Number(e.target.value) || 0 })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                      className={modalInputClass}
                       placeholder="0.00"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Minimum Stock *
                     </label>
                     <input
@@ -676,13 +715,13 @@ export default function Inventory() {
                       required
                       value={formData.minimum_stock}
                       onChange={(e) => setFormData({ ...formData, minimum_stock: Number(e.target.value) || 0 })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                      className={modalInputClass}
                       placeholder="0.00"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Maximum Stock
                     </label>
                     <input
@@ -691,13 +730,13 @@ export default function Inventory() {
                       min="0"
                       value={formData.maximum_stock}
                       onChange={(e) => setFormData({ ...formData, maximum_stock: Number(e.target.value) || 0 })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                      className={modalInputClass}
                       placeholder="0.00"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Unit Price (LKR) *
                     </label>
                     <input
@@ -707,13 +746,13 @@ export default function Inventory() {
                       required
                       value={formData.unit_price}
                       onChange={(e) => setFormData({ ...formData, unit_price: Number(e.target.value) || 0 })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                      className={modalInputClass}
                       placeholder="0.00"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Supplier
                     </label>
                     <select
@@ -726,7 +765,7 @@ export default function Inventory() {
                           supplier_name: selectedSupplier ? selectedSupplier.name : ''
                         });
                       }}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900"
+                      className={modalSelectClass}
                     >
                       <option value="">Select supplier</option>
                       {suppliers.map((supplier) => (
@@ -738,38 +777,38 @@ export default function Inventory() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Location
                     </label>
                     <input
                       type="text"
                       value={formData.location}
                       onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                      className={modalInputClass}
                       placeholder="Warehouse location"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Expiry Date
                     </label>
                     <input
                       type="date"
                       value={formData.expiry_date}
                       onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900"
+                      className={modalInputClass}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-900">
+                    <label className={modalLabelClass}>
                       Status
                     </label>
                     <select
                       value={formData.status}
                       onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
-                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900"
+                      className={modalSelectClass}
                     >
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
@@ -778,30 +817,30 @@ export default function Inventory() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-900">
+                  <label className={modalLabelClass}>
                     Description
                   </label>
                   <textarea
                     rows={3}
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 sm:text-sm text-gray-900 placeholder-gray-500"
+                    className={modalTextareaClass}
                     placeholder="Enter item description"
                   />
                 </div>
 
-                <div className="flex justify-end space-x-3 pt-4">
+                <div className="sticky bottom-0 bg-white/95 border-t border-orange-100 -mx-6 px-6 py-4 flex justify-end space-x-3">
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}
-                    className="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                    className="bg-white py-2.5 px-5 border border-orange-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={saving}
-                    className="bg-orange-600 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="bg-gradient-to-r from-orange-500 to-amber-500 py-2.5 px-5 border border-transparent rounded-xl shadow-sm text-sm font-semibold text-white hover:from-orange-600 hover:to-amber-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {saving ? 'Saving...' : (editingItem ? 'Update Item' : 'Add Item')}
                   </button>

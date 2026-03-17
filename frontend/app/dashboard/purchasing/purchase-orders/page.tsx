@@ -56,6 +56,10 @@ interface InventoryItem {
 
 interface OrderItem {
   inventory_item_id: number;
+  item_name: string;
+  item_code: string;
+  item_unit: string;
+  unit_price: number;
   quantity: number;
 }
 
@@ -149,8 +153,36 @@ export default function PurchaseOrdersPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (formData.items.length === 0) {
+      alert('Please add at least one order item.');
+      return;
+    }
+
+    const invalidIndex = formData.items.findIndex((item) => {
+      const hasSelectedItem = Number(item.inventory_item_id) > 0;
+      const hasTypedItem = item.item_name.trim().length > 0;
+      return !hasSelectedItem && !hasTypedItem;
+    });
+
+    if (invalidIndex >= 0) {
+      alert(`Item ${invalidIndex + 1}: select an available stock item or type a new item name.`);
+      return;
+    }
+
     try {
-      await axios.post('http://localhost:8000/api/purchasing/purchase-orders', formData, {
+      await axios.post('http://localhost:8000/api/purchasing/purchase-orders', {
+        ...formData,
+        supplier_id: Number(formData.supplier_id),
+        items: formData.items.map((item) => ({
+          inventory_item_id: item.inventory_item_id || null,
+          item_name: item.item_name.trim() || null,
+          item_code: item.item_code.trim() || null,
+          item_unit: item.item_unit.trim() || null,
+          unit_price: Number(item.unit_price) || 0,
+          quantity: Number(item.quantity) || 0,
+        })),
+      }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setShowForm(false);
@@ -162,15 +194,17 @@ export default function PurchaseOrdersPage() {
         items: [],
       });
       fetchPurchaseOrders();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating purchase order:', error);
+      const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
+      alert(firstError?.[0] || error?.response?.data?.message || 'Failed to create purchase order.');
     }
   };
 
   const addItem = () => {
     setFormData({
       ...formData,
-      items: [...formData.items, { inventory_item_id: 0, quantity: 1 }],
+      items: [...formData.items, { inventory_item_id: 0, item_name: '', item_code: '', item_unit: 'pieces', unit_price: 0, quantity: 1 }],
     });
   };
 
@@ -183,6 +217,27 @@ export default function PurchaseOrdersPage() {
   const removeItem = (index: number) => {
     const updatedItems = formData.items.filter((_, i) => i !== index);
     setFormData({ ...formData, items: updatedItems });
+  };
+
+  const handleInventorySelect = (index: number, rawValue: string) => {
+    const inventoryItemId = parseInt(rawValue, 10) || 0;
+    const selected = inventoryItems.find((inv) => inv.id === inventoryItemId);
+
+    if (selected) {
+      const updatedItems = [...formData.items];
+      updatedItems[index] = {
+        ...updatedItems[index],
+        inventory_item_id: selected.id,
+        item_name: selected.name,
+        item_code: selected.code,
+        item_unit: selected.unit || 'pieces',
+        unit_price: Number(selected.unit_price) || 0,
+      };
+      setFormData({ ...formData, items: updatedItems });
+      return;
+    }
+
+    updateItem(index, 'inventory_item_id', 0);
   };
 
   const getStatusColor = (status: string) => {
@@ -213,6 +268,10 @@ export default function PurchaseOrdersPage() {
     return <div className="text-center py-8">Loading...</div>;
   }
 
+  const modalLabelClass = 'block text-xs font-semibold uppercase tracking-wide text-slate-600';
+  const modalInputClass = 'mt-1.5 block w-full rounded-xl border border-blue-100 bg-gradient-to-b from-white to-blue-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 placeholder:text-gray-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100 focus:outline-none';
+  const modalSelectClass = 'mt-1.5 block w-full rounded-xl border border-blue-100 bg-gradient-to-b from-white to-blue-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 focus:border-blue-400 focus:ring-4 focus:ring-blue-100 focus:outline-none';
+
   return (
     <div className="px-4 sm:px-6 lg:px-8">
       <div className="sm:flex sm:items-center">
@@ -234,18 +293,21 @@ export default function PurchaseOrdersPage() {
 
       {/* Add Purchase Order Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+        <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-sm overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-0 border border-blue-100 w-11/12 max-w-5xl shadow-2xl rounded-2xl bg-white/95 max-h-[90vh] overflow-y-auto">
             <div className="mt-3">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Create Purchase Order</h3>
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="sticky top-0 z-10 px-6 py-4 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-cyan-50 to-white backdrop-blur-sm">
+                <h3 className="text-lg font-semibold text-gray-900">Create Purchase Order</h3>
+                <p className="text-xs text-gray-600 mt-0.5">Select from available inventory suggestions or type brand-new item names.</p>
+              </div>
+              <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Supplier</label>
+                    <label className={modalLabelClass}>Supplier</label>
                     <select
                       value={formData.supplier_id}
                       onChange={(e) => setFormData({ ...formData, supplier_id: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+                      className={modalSelectClass}
                       required
                     >
                       <option value="">Select Supplier</option>
@@ -257,30 +319,30 @@ export default function PurchaseOrdersPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Order Date</label>
+                    <label className={modalLabelClass}>Order Date</label>
                     <input
                       type="date"
                       value={formData.order_date}
                       onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+                      className={modalInputClass}
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Expected Delivery Date</label>
+                    <label className={modalLabelClass}>Expected Delivery Date</label>
                     <input
                       type="date"
                       value={formData.expected_delivery_date}
                       onChange={(e) => setFormData({ ...formData, expected_delivery_date: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+                      className={modalInputClass}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Notes</label>
+                    <label className={modalLabelClass}>Notes</label>
                     <textarea
                       value={formData.notes}
                       onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+                      className={modalInputClass}
                       rows={3}
                     />
                   </div>
@@ -289,53 +351,114 @@ export default function PurchaseOrdersPage() {
                 {/* Order Items */}
                 <div>
                   <div className="flex justify-between items-center mb-2">
-                    <h4 className="text-md font-medium text-gray-900">Order Items</h4>
+                    <h4 className="text-md font-semibold text-gray-900">Order Items</h4>
                     <button
                       type="button"
                       onClick={addItem}
-                      className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-blue-600 bg-blue-100 hover:bg-blue-200"
+                      className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-lg text-blue-700 bg-blue-100 hover:bg-blue-200"
                     >
                       Add Item
                     </button>
                   </div>
                   <div className="space-y-4">
                     {formData.items.map((item, index) => (
-                      <div key={index} className="p-4 border rounded-md bg-gray-50">
+                      <div key={index} className="p-4 border border-blue-100 rounded-xl bg-gradient-to-br from-blue-50/40 to-white">
                         <div className="flex justify-between items-center mb-3">
-                          <h5 className="text-sm font-medium text-gray-900">Item {index + 1}</h5>
+                          <h5 className="text-sm font-semibold text-gray-900">Item {index + 1}</h5>
                           <button
                             type="button"
                             onClick={() => removeItem(index)}
-                            className="text-red-600 hover:text-red-800 text-sm"
+                            className="text-red-600 hover:text-red-800 text-sm font-medium"
                           >
                             Remove
                           </button>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Inventory Item</label>
+                            <label className={modalLabelClass}>Available Stock Suggestion</label>
                             <select
                               value={item.inventory_item_id}
-                              onChange={(e) => updateItem(index, 'inventory_item_id', parseInt(e.target.value))}
-                              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900"
-                              required
+                              onChange={(e) => handleInventorySelect(index, e.target.value)}
+                              className={modalSelectClass}
                             >
                               <option value={0}>Select Item</option>
                               {inventoryItems.map((invItem) => (
                                 <option key={invItem.id} value={invItem.id}>
-                                  {invItem.name} ({invItem.code})
+                                  {invItem.name} ({invItem.code}) • Stock: {Number(invItem.current_stock || 0).toFixed(2)}
                                 </option>
                               ))}
                             </select>
                           </div>
+
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                            <label className={modalLabelClass}>Or Type New Item Name</label>
+                            <input
+                              type="text"
+                              value={item.item_name}
+                              onChange={(e) => {
+                                updateItem(index, 'item_name', e.target.value);
+                                if (e.target.value.trim().length > 0 && item.inventory_item_id !== 0) {
+                                  updateItem(index, 'inventory_item_id', 0);
+                                }
+                              }}
+                              className={modalInputClass}
+                              placeholder="Type item if not in stock list"
+                              required={item.inventory_item_id === 0}
+                            />
+                          </div>
+
+                          <div>
+                            <label className={modalLabelClass}>Item Code (Optional)</label>
+                            <input
+                              type="text"
+                              value={item.item_code}
+                              onChange={(e) => updateItem(index, 'item_code', e.target.value.toUpperCase())}
+                              className={modalInputClass}
+                              placeholder="Auto-generated if empty"
+                            />
+                          </div>
+
+                          <div>
+                            <label className={modalLabelClass}>Unit</label>
+                            <select
+                              value={item.item_unit}
+                              onChange={(e) => updateItem(index, 'item_unit', e.target.value)}
+                              className={modalSelectClass}
+                            >
+                              <option value="pieces">Pieces</option>
+                              <option value="kg">Kilograms (kg)</option>
+                              <option value="g">Grams (g)</option>
+                              <option value="liters">Liters</option>
+                              <option value="ml">Milliliters (ml)</option>
+                              <option value="bags">Bags</option>
+                              <option value="boxes">Boxes</option>
+                              <option value="meters">Meters</option>
+                              <option value="feet">Feet</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className={modalLabelClass}>Unit Price (LKR)</label>
+                            <input
+                              type="number"
+                              value={item.unit_price}
+                              onChange={(e) => updateItem(index, 'unit_price', parseFloat(e.target.value) || 0)}
+                              className={modalInputClass}
+                              min="0"
+                              step="0.01"
+                              required
+                              placeholder="0.00"
+                            />
+                          </div>
+
+                          <div>
+                            <label className={modalLabelClass}>Quantity</label>
                             <input
                               type="number"
                               value={item.quantity}
                               onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value))}
-                              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm text-gray-900"
-                              min="0"
+                              className={modalInputClass}
+                              min="0.01"
                               step="0.01"
                               required
                               placeholder="0.00"
@@ -347,17 +470,17 @@ export default function PurchaseOrdersPage() {
                   </div>
                 </div>
 
-                <div className="flex justify-end space-x-3 pt-4">
+                <div className="sticky bottom-0 bg-white/95 border-t border-blue-100 -mx-6 px-6 py-4 flex justify-end space-x-3">
                   <button
                     type="button"
                     onClick={() => setShowForm(false)}
-                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="px-5 py-2.5 border border-blue-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-blue-50"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-blue-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-blue-700"
+                    className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 border border-transparent rounded-xl text-sm font-semibold text-white hover:from-blue-700 hover:to-cyan-700"
                   >
                     Create Order
                   </button>

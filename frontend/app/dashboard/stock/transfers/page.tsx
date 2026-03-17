@@ -93,6 +93,8 @@ export default function StockTransfersPage() {
   const [transferLines, setTransferLines] = useState<TransferLine[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const inputBaseClass =
+    'w-full rounded-xl border border-orange-100 bg-white/95 px-3.5 py-2.5 text-sm text-gray-800 shadow-sm placeholder:text-gray-400 transition-all duration-200 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
 
   const router = useRouter();
 
@@ -449,58 +451,70 @@ export default function StockTransfersPage() {
 
   if (!token || loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white shadow rounded-lg">
-        <div className="px-4 py-5 sm:p-6 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg leading-6 font-medium text-gray-900">Transfer Stock to Outlets</h3>
-            <p className="mt-1 max-w-2xl text-sm text-gray-500">Move inventory quantities from central stock to active outlets.</p>
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 relative overflow-hidden">
+      <div className="absolute inset-0 opacity-35 pointer-events-none">
+        <div className="absolute top-10 left-12 w-72 h-72 bg-orange-200 rounded-full mix-blend-multiply filter blur-2xl animate-pulse"></div>
+        <div className="absolute top-24 right-12 w-72 h-72 bg-amber-200 rounded-full mix-blend-multiply filter blur-2xl animate-pulse"></div>
+        <div className="absolute -bottom-8 left-1/3 w-80 h-80 bg-yellow-200 rounded-full mix-blend-multiply filter blur-2xl animate-pulse"></div>
+      </div>
+
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        <div className="rounded-2xl border border-white/70 bg-white/85 backdrop-blur-xl shadow-xl">
+          <div className="px-5 py-6 sm:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <p className="text-xs tracking-[0.18em] uppercase text-orange-500 font-semibold">Distribution Center</p>
+              <h3 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-orange-600 to-amber-600 bg-clip-text text-transparent">
+                Transfer Stock to Outlets
+              </h3>
+              <p className="mt-1 max-w-2xl text-sm text-gray-600">
+                Build transfer invoices with quick item search and move inventory from central stock to active outlets.
+              </p>
+            </div>
+            <button
+              onClick={() => router.push('/dashboard/stock')}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-orange-700 border border-orange-200 bg-orange-50 hover:bg-orange-100"
+            >
+              Back to Stock
+            </button>
           </div>
-          <button
-            onClick={() => router.push('/dashboard/stock')}
-            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Back to Stock
-          </button>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-white shadow rounded-lg p-4">
-          <p className="text-xs text-gray-500 uppercase">Invoices</p>
-          <p className="text-2xl font-semibold text-gray-900">{report.total_invoices}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="rounded-xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-sm p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Invoices</p>
+            <p className="text-2xl font-bold text-gray-900">{report.total_invoices}</p>
+          </div>
+          <div className="rounded-xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-sm p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Transfer Lines</p>
+            <p className="text-2xl font-bold text-gray-900">{report.total_lines}</p>
+          </div>
+          <div className="rounded-xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-sm p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Total Quantity</p>
+            <p className="text-2xl font-bold text-gray-900">{report.total_quantity.toFixed(2)}</p>
+          </div>
+          <div className="rounded-xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-sm p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Outlets</p>
+            <p className="text-2xl font-bold text-gray-900">{report.total_outlets}</p>
+          </div>
+          <div className="rounded-xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-sm p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Last Transfer</p>
+            <p className="text-sm font-semibold text-gray-900">
+              {report.last_transfer_at ? new Date(report.last_transfer_at).toLocaleString() : '-'}
+            </p>
+          </div>
         </div>
-        <div className="bg-white shadow rounded-lg p-4">
-          <p className="text-xs text-gray-500 uppercase">Transfer Lines</p>
-          <p className="text-2xl font-semibold text-gray-900">{report.total_lines}</p>
-        </div>
-        <div className="bg-white shadow rounded-lg p-4">
-          <p className="text-xs text-gray-500 uppercase">Total Quantity</p>
-          <p className="text-2xl font-semibold text-gray-900">{report.total_quantity.toFixed(2)}</p>
-        </div>
-        <div className="bg-white shadow rounded-lg p-4">
-          <p className="text-xs text-gray-500 uppercase">Outlets</p>
-          <p className="text-2xl font-semibold text-gray-900">{report.total_outlets}</p>
-        </div>
-        <div className="bg-white shadow rounded-lg p-4">
-          <p className="text-xs text-gray-500 uppercase">Last Transfer</p>
-          <p className="text-sm font-semibold text-gray-900">
-            {report.last_transfer_at ? new Date(report.last_transfer_at).toLocaleString() : '-'}
-          </p>
-        </div>
-      </div>
 
-      <div className="bg-white shadow rounded-lg">
-        <div className="px-4 py-5 sm:p-6">
-          <h4 className="text-md font-semibold text-gray-900 mb-4">New Transfer Invoice</h4>
-          <form onSubmit={handleTransfer} className="space-y-5">
+        <div className="rounded-2xl border border-white/70 bg-white/90 backdrop-blur-xl shadow-xl">
+          <div className="px-5 py-6 sm:px-6">
+            <h4 className="text-lg font-semibold text-gray-900 mb-4">New Transfer Invoice</h4>
+            <form onSubmit={handleTransfer} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Inventory Item</label>
@@ -542,10 +556,10 @@ export default function StockTransfersPage() {
                       }
                     }}
                     placeholder="Scan barcode or type item code/name"
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 text-sm text-black"
+                    className={inputBaseClass}
                   />
                   {showDropdown && filteredItems.length > 0 && (
-                    <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-56 overflow-y-auto">
+                    <div className="absolute z-20 mt-2 w-full bg-white border border-orange-100 rounded-xl shadow-xl max-h-56 overflow-y-auto">
                       {filteredItems.map((item, index) => (
                         <button
                           key={item.id}
@@ -556,7 +570,7 @@ export default function StockTransfersPage() {
                           }`}
                         >
                           <div className="text-sm font-medium text-gray-900">{item.code} - {item.name}</div>
-                          <div className="text-xs text-gray-500">Stock: {item.current_stock} {item.unit}</div>
+                          <div className="text-xs text-gray-600">Stock: {item.current_stock} {item.unit}</div>
                         </button>
                       ))}
                     </div>
@@ -574,7 +588,7 @@ export default function StockTransfersPage() {
                 <select
                   value={outletId}
                   onChange={(e) => setOutletId(e.target.value)}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 text-sm text-black"
+                  className={inputBaseClass}
                   required
                 >
                   <option value="">Select outlet</option>
@@ -602,7 +616,7 @@ export default function StockTransfersPage() {
                       addLineItem();
                     }
                   }}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 text-sm text-black"
+                  className={inputBaseClass}
                   placeholder="Type qty and press Enter"
                 />
               </div>
@@ -613,7 +627,7 @@ export default function StockTransfersPage() {
                   type="text"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 text-sm text-black"
+                  className={inputBaseClass}
                   placeholder="Optional invoice note"
                 />
               </div>
@@ -623,15 +637,15 @@ export default function StockTransfersPage() {
               <button
                 type="button"
                 onClick={addLineItem}
-                className="px-4 py-2 bg-blue-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-blue-700"
+                className="px-4 py-2 bg-gradient-to-r from-sky-600 to-blue-600 border border-transparent rounded-lg text-sm font-medium text-white hover:from-sky-700 hover:to-blue-700"
               >
                 Add Item Line
               </button>
             </div>
 
-            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+            <div className="overflow-x-auto border border-gray-200 rounded-xl bg-white">
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className="bg-gradient-to-r from-orange-50 to-amber-50">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
@@ -641,7 +655,7 @@ export default function StockTransfersPage() {
                     <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-gray-100">
                   {transferLines.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="px-4 py-6 text-center text-sm text-gray-500">No line items added.</td>
@@ -667,7 +681,7 @@ export default function StockTransfersPage() {
                     ))
                   )}
                 </tbody>
-                <tfoot className="bg-gray-50">
+                <tfoot className="bg-gradient-to-r from-orange-50 to-amber-50">
                   <tr>
                     <td colSpan={4} className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Invoice Total</td>
                     <td className="px-4 py-2 text-right text-sm font-bold text-gray-900">{invoiceTotal.toFixed(2)}</td>
@@ -681,24 +695,24 @@ export default function StockTransfersPage() {
               <button
                 type="submit"
                 disabled={saving}
-                className="px-4 py-2 bg-orange-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
+                className="px-5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 border border-transparent rounded-lg text-sm font-medium text-white hover:from-orange-600 hover:to-amber-600 disabled:opacity-50"
               >
                 {saving ? 'Transferring...' : 'Submit Transfer Invoice'}
               </button>
             </div>
           </form>
+          </div>
         </div>
-      </div>
 
-      <div className="bg-white shadow rounded-lg">
-        <div className="px-4 py-5 sm:p-6">
+        <div className="rounded-2xl border border-white/70 bg-white/90 backdrop-blur-xl shadow-xl">
+          <div className="px-5 py-6 sm:px-6">
           <div className="flex items-center justify-between mb-4">
-            <h4 className="text-md font-semibold text-gray-900">Recent Transfers</h4>
+            <h4 className="text-lg font-semibold text-gray-900">Recent Transfers</h4>
             <p className="text-sm text-gray-500">Total Records: {totalTransfers}</p>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-xl border border-gray-200">
             <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+              <thead className="bg-gradient-to-r from-orange-50 to-amber-50">
                 <tr>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ref</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
@@ -709,7 +723,7 @@ export default function StockTransfersPage() {
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-white divide-y divide-gray-100">
                 {transfers.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">No transfers recorded yet.</td>
@@ -727,7 +741,7 @@ export default function StockTransfersPage() {
                         <button
                           type="button"
                           onClick={() => handleViewDetails(transfer)}
-                          className="px-3 py-1 bg-orange-600 text-white rounded-md text-xs hover:bg-orange-700"
+                          className="px-3 py-1 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-md text-xs hover:from-orange-600 hover:to-amber-600"
                         >
                           View Details
                         </button>
@@ -744,7 +758,7 @@ export default function StockTransfersPage() {
               type="button"
               onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
               disabled={currentPage === 1}
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               Previous
             </button>
@@ -753,18 +767,18 @@ export default function StockTransfersPage() {
               type="button"
               onClick={() => setCurrentPage((prev) => Math.min(lastPage, prev + 1))}
               disabled={currentPage === lastPage}
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               Next
             </button>
           </div>
+          </div>
         </div>
-      </div>
 
-      {showDetailsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        {showDetailsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto border border-white/60">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-orange-50 to-amber-50">
               <h3 className="text-lg font-semibold text-gray-900">Transfer Details</h3>
               <button
                 type="button"
@@ -786,32 +800,32 @@ export default function StockTransfersPage() {
               ) : (
                 <div className="space-y-5">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-gray-50 rounded-md p-3">
+                    <div className="bg-orange-50/70 border border-orange-100 rounded-lg p-3">
                       <p className="text-xs text-gray-500 uppercase">Reference</p>
                       <p className="text-sm font-semibold text-gray-900">{selectedTransferDetails.transfer_reference}</p>
                     </div>
-                    <div className="bg-gray-50 rounded-md p-3">
+                    <div className="bg-orange-50/70 border border-orange-100 rounded-lg p-3">
                       <p className="text-xs text-gray-500 uppercase">Date</p>
                       <p className="text-sm font-semibold text-gray-900">{new Date(selectedTransferDetails.transferred_at).toLocaleString()}</p>
                     </div>
-                    <div className="bg-gray-50 rounded-md p-3">
+                    <div className="bg-orange-50/70 border border-orange-100 rounded-lg p-3">
                       <p className="text-xs text-gray-500 uppercase">Transferred By</p>
                       <p className="text-sm font-semibold text-gray-900">{selectedTransferDetails.transferred_by_user?.name || '-'}</p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-gray-50 rounded-md p-3">
+                    <div className="bg-amber-50/70 border border-amber-100 rounded-lg p-3">
                       <p className="text-xs text-gray-500 uppercase">Outlet</p>
                       <p className="text-sm font-semibold text-gray-900">
                         {selectedTransferDetails.outlet?.name || '-'} ({selectedTransferDetails.outlet?.code || '-'})
                       </p>
                     </div>
-                    <div className="bg-gray-50 rounded-md p-3">
+                    <div className="bg-amber-50/70 border border-amber-100 rounded-lg p-3">
                       <p className="text-xs text-gray-500 uppercase">Total Lines</p>
                       <p className="text-sm font-semibold text-gray-900">{selectedTransferDetails.total_lines}</p>
                     </div>
-                    <div className="bg-gray-50 rounded-md p-3">
+                    <div className="bg-amber-50/70 border border-amber-100 rounded-lg p-3">
                       <p className="text-xs text-gray-500 uppercase">Total Quantity</p>
                       <p className="text-sm font-semibold text-gray-900">{Number(selectedTransferDetails.total_quantity).toFixed(2)}</p>
                     </div>
@@ -822,9 +836,9 @@ export default function StockTransfersPage() {
                     <p className="text-sm text-gray-800">{selectedTransferDetails.notes || '-'}</p>
                   </div>
 
-                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                  <div className="overflow-x-auto border border-gray-200 rounded-xl">
                     <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
+                      <thead className="bg-gradient-to-r from-orange-50 to-amber-50">
                         <tr>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
@@ -849,14 +863,14 @@ export default function StockTransfersPage() {
                     <button
                       type="button"
                       onClick={handlePrintDetails}
-                      className="px-4 py-2 bg-orange-600 text-white rounded-md text-sm hover:bg-orange-700"
+                      className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-lg text-sm hover:from-orange-600 hover:to-amber-600"
                     >
                       Print
                     </button>
                     <button
                       type="button"
                       onClick={handleDownloadDetails}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+                      className="px-4 py-2 bg-gradient-to-r from-blue-600 to-sky-600 text-white rounded-lg text-sm hover:from-blue-700 hover:to-sky-700"
                     >
                       Download CSV
                     </button>
@@ -865,8 +879,9 @@ export default function StockTransfersPage() {
               )}
             </div>
           </div>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -30,6 +30,8 @@ interface AttendanceRecord {
 }
 
 export default function AttendancePage() {
+  type NoticeTone = 'success' | 'error' | 'info';
+
   const [token, setToken] = useState('');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,7 +53,12 @@ export default function AttendancePage() {
   const [markingOutAttendance, setMarkingOutAttendance] = useState<AttendanceRecord | null>(null);
   const [markOutTimeInput, setMarkOutTimeInput] = useState('');
   const [markOutNotes, setMarkOutNotes] = useState('');
+  const [noticeModal, setNoticeModal] = useState<{ title: string; message: string; tone: NoticeTone } | null>(null);
   const router = useRouter();
+
+  const openNoticeModal = (tone: NoticeTone, title: string, message: string) => {
+    setNoticeModal({ tone, title, message });
+  };
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -71,9 +78,16 @@ export default function AttendancePage() {
       const response = await axios.get('http://localhost:8000/api/hr/employees', {
         headers: { Authorization: `Bearer ${tokenToUse}` },
       });
-      setEmployees(response.data.data || []);
+      const rows = Array.isArray(response.data)
+        ? response.data
+        : Array.isArray(response.data?.data)
+          ? response.data.data
+          : [];
+
+      setEmployees(rows);
     } catch (error) {
       console.error('Error fetching employees:', error);
+      setEmployees([]);
     }
   };
 
@@ -114,12 +128,12 @@ export default function AttendancePage() {
       if (outTime) payload.out_time = outTime;
       if (notes) payload.notes = notes;
 
-      const response = await axios.post(
+      await axios.post(
         'http://localhost:8000/api/hr/attendance/mark',
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      alert(`Marked ${status} successfully!`);
+      openNoticeModal('success', 'Attendance Marked', `Marked ${status} successfully.`);
       // Refresh today's attendance data
       fetchTodayAttendance();
       // Close modal if open
@@ -140,7 +154,7 @@ export default function AttendancePage() {
         errorMessage = error.response?.data?.message || error.response?.data?.error || errorMessage;
       }
       
-      alert(`Error: ${errorMessage}`);
+      openNoticeModal('error', 'Attendance Error', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -184,23 +198,23 @@ export default function AttendancePage() {
       
       if (notes) payload.notes = notes;
 
-      const response = await axios.post(
+      await axios.post(
         'http://localhost:8000/api/hr/attendance/mark-out',
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      alert('Marked out successfully!');
+      openNoticeModal('success', 'Marked Out', 'Marked out successfully.');
       // Refresh today's attendance data
       fetchTodayAttendance();
       setShowMarkOutModal(false);
     } catch (error: any) {
       console.error('Error marking out:', error);
       if (error.response?.status === 409) {
-        alert(error.response.data.message);
+        openNoticeModal('error', 'Mark Out Error', error.response.data.message || 'Attendance is already marked out.');
       } else if (error.response?.status === 404) {
-        alert(error.response.data.message);
+        openNoticeModal('error', 'Mark Out Error', error.response.data.message || 'Attendance record not found.');
       } else {
-        alert('Failed to mark out.');
+        openNoticeModal('error', 'Mark Out Error', 'Failed to mark out.');
       }
     } finally {
       setLoading(false);
@@ -215,7 +229,7 @@ export default function AttendancePage() {
 
   const handleCsvUpload = async () => {
     if (!csvFile) {
-      alert('Please select a CSV file first.');
+      openNoticeModal('info', 'CSV Required', 'Please select a CSV file first.');
       return;
     }
     setLoading(true);
@@ -234,10 +248,10 @@ export default function AttendancePage() {
         }
       );
       setUploadResult(response.data);
-      alert(`Upload processed! Created ${response.data.created_records} records.`);
+      openNoticeModal('success', 'Upload Completed', `Upload processed. Created ${response.data.created_records} records.`);
     } catch (error: any) {
       console.error('Error uploading CSV:', error);
-      alert('Failed to upload CSV: ' + (error.response?.data?.error || error.message));
+      openNoticeModal('error', 'Upload Failed', 'Failed to upload CSV: ' + (error.response?.data?.error || error.message));
     } finally {
       setLoading(false);
     }
@@ -258,7 +272,7 @@ export default function AttendancePage() {
       setAttendanceHistory(response.data.attendance);
     } catch (error) {
       console.error('Error fetching attendance history:', error);
-      alert('Failed to fetch attendance history.');
+      openNoticeModal('error', 'History Error', 'Failed to fetch attendance history.');
     } finally {
       setLoading(false);
     }
@@ -632,6 +646,38 @@ export default function AttendancePage() {
         )}
       </main>
 
+      {/* Feedback Modal */}
+      {noticeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-lg font-bold ${
+                  noticeModal.tone === 'success'
+                    ? 'bg-green-500'
+                    : noticeModal.tone === 'error'
+                      ? 'bg-red-500'
+                      : 'bg-orange-500'
+                }`}>
+                  {noticeModal.tone === 'success' ? '✓' : noticeModal.tone === 'error' ? '!' : 'i'}
+                </div>
+                <h3 className="text-xl font-bold text-gray-900">{noticeModal.title}</h3>
+              </div>
+              <p className="text-gray-700 leading-relaxed">{noticeModal.message}</p>
+              <div className="flex justify-end mt-6">
+                <button
+                  type="button"
+                  onClick={() => setNoticeModal(null)}
+                  className="px-5 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 transition-colors"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Attendance Marking Modal */}
       {showMarkModal && markingEmployee && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -649,7 +695,7 @@ export default function AttendancePage() {
                     <select
                       value={markStatus}
                       onChange={(e) => setMarkStatus(e.target.value as 'present' | 'absent' | 'late' | 'half_day')}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                       required
                     >
                       <option value="present">Present</option>
@@ -666,7 +712,7 @@ export default function AttendancePage() {
                       type="time"
                       value={markInTime}
                       onChange={(e) => setMarkInTime(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                     />
                   </div>
                   <div>
@@ -677,7 +723,7 @@ export default function AttendancePage() {
                       value={markNotes}
                       onChange={(e) => setMarkNotes(e.target.value)}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-500 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                       placeholder="Add any additional notes..."
                     />
                   </div>
@@ -730,7 +776,7 @@ export default function AttendancePage() {
                       type="time"
                       value={markOutTimeInput}
                       onChange={(e) => setMarkOutTimeInput(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                       required
                     />
                   </div>
@@ -742,7 +788,7 @@ export default function AttendancePage() {
                       value={markOutNotes}
                       onChange={(e) => setMarkOutNotes(e.target.value)}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-500 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                       placeholder="Add any additional notes..."
                     />
                   </div>

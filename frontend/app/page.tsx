@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import axios from 'axios';
 
 export default function Home() {
@@ -9,6 +10,7 @@ export default function Home() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const params = useSearchParams();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,10 +20,51 @@ export default function Home() {
         email,
         password,
       });
-      localStorage.setItem('token', response.data.token);
+      const nextToken = response.data.token;
+      localStorage.setItem('token', nextToken);
+
+      try {
+        const userRes = await axios.get('http://localhost:8000/api/user', {
+          headers: { Authorization: `Bearer ${nextToken}` },
+        });
+
+        const userData = userRes.data || {};
+        const roleNames = [
+          String(userData?.role || ''),
+          ...(Array.isArray(userData?.roles)
+            ? userData.roles.map((role: any) => String(role?.name || role || ''))
+            : []),
+        ]
+          .map((role) => role.trim().toLowerCase())
+          .filter(Boolean);
+
+        const isOutletUser = roleNames.some((role) => role.includes('outlet_user'));
+        const nextPath = params.get('next');
+
+        if (isOutletUser) {
+          if (nextPath && nextPath.startsWith('/')) {
+            router.push(nextPath);
+          } else {
+            router.push('/outlet-pos');
+          }
+          return;
+        }
+
+        if (nextPath && nextPath.startsWith('/dashboard')) {
+          router.push(nextPath);
+          return;
+        }
+      } catch (profileError) {
+        console.error('Error loading user profile after login:', profileError);
+      }
+
       router.push('/dashboard');
-    } catch (error) {
-      alert('Login failed. Please check your credentials.');
+    } catch (error: any) {
+      const serverMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.errors?.email?.[0] ||
+        'Login failed. Please check your credentials.';
+      alert(serverMessage);
     } finally {
       setLoading(false);
     }

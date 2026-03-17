@@ -1,7 +1,10 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BackupRestoreSettingController;
 use App\Http\Controllers\CompanyController;
+use App\Http\Controllers\SecuritySettingController;
+use App\Http\Controllers\SystemSettingController;
 use App\Http\Controllers\Api\HR\DepartmentController;
 use App\Http\Controllers\Api\HR\DesignationController;
 use App\Http\Controllers\Api\HR\EmployeeController;
@@ -14,6 +17,7 @@ use App\Http\Controllers\Api\HR\CandidateDocumentController;
 use App\Http\Controllers\Api\HR\CandidateEducationController;
 use App\Http\Controllers\Api\HR\CandidateExperienceController;
 use App\Http\Controllers\Api\HR\CandidateInterviewController;
+use App\Http\Controllers\Api\HR\EmployeeAllowanceDeductionController;
 use App\Http\Controllers\Api\HR\EmployeeDocumentController;
 use App\Http\Controllers\Api\HR\EmployeeEducationController;
 use App\Http\Controllers\Api\HR\EmployeeExperienceController;
@@ -56,6 +60,12 @@ Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanc
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('companies', CompanyController::class);
+    Route::get('system-settings', [SystemSettingController::class, 'show']);
+    Route::put('system-settings', [SystemSettingController::class, 'update']);
+    Route::get('security-settings', [SecuritySettingController::class, 'show']);
+    Route::put('security-settings', [SecuritySettingController::class, 'update']);
+    Route::get('backup-settings', [BackupRestoreSettingController::class, 'show']);
+    Route::put('backup-settings', [BackupRestoreSettingController::class, 'update']);
 
     // HRM Routes
     Route::prefix('hr')->group(function () {
@@ -142,11 +152,52 @@ Route::middleware('auth:sanctum')->group(function () {
     // Outlets Management Routes
     Route::apiResource('outlets', \App\Http\Controllers\OutletController::class);
     Route::get('outlets/{outlet}/stock-report', [\App\Http\Controllers\OutletController::class, 'stockReport']);
+    Route::get('outlet-pos/me', [\App\Http\Controllers\OutletPosController::class, 'me']);
+    Route::get('outlet-pos/sales', [\App\Http\Controllers\OutletPosController::class, 'index']);
+    Route::post('outlet-pos/sales', [\App\Http\Controllers\OutletPosController::class, 'store']);
+    Route::post('outlet-pos/cash-drawer-balance', [\App\Http\Controllers\OutletPosController::class, 'setCashDrawerBalance']);
+    Route::get('outlet-pos/cash-drawer-status', [\App\Http\Controllers\OutletPosController::class, 'cashDrawerStatus']);
+    Route::post('outlet-pos/cash-drawer-open', [\App\Http\Controllers\OutletPosController::class, 'openCashDrawer']);
+    Route::post('outlet-pos/cash-drawer-close', [\App\Http\Controllers\OutletPosController::class, 'closeCashDrawer']);
+    Route::get('outlet-pos/cash-drawer-balance-sheet', [\App\Http\Controllers\OutletPosController::class, 'cashDrawerBalanceSheet']);
+    Route::get('outlet-pos/cash-drawer-transactions', [\App\Http\Controllers\OutletPosController::class, 'cashDrawerTransactionRecords']);
+    Route::get('outlet-pos/loyalty-customers', [\App\Http\Controllers\OutletPosController::class, 'loyaltyCustomers']);
+    Route::post('outlet-pos/loyalty-customers', [\App\Http\Controllers\OutletPosController::class, 'storeLoyaltyCustomer']);
+    Route::get('outlet-pos/sales-summary', [\App\Http\Controllers\OutletPosController::class, 'summary']);
+    Route::get('outlet-pos/outlets/{outlet}/sales-report', [\App\Http\Controllers\OutletPosController::class, 'outletSalesReport']);
 
     // Purchasing Routes
     // Route::apiResource('purchasing/purchase-orders', PurchaseOrderController::class);
     Route::apiResource('purchasing/purchase-orders', \App\Http\Controllers\Api\Purchasing\PurchaseOrderController::class);
     Route::apiResource('purchasing/grn', \App\Http\Controllers\Api\Purchasing\GRNController::class);
+
+    // Production - Formula Management (BOM)
+    Route::get('production/products', [\App\Http\Controllers\Production\BomController::class, 'products']);
+    Route::post('production/products', [\App\Http\Controllers\Production\BomController::class, 'storeProduct']);
+    Route::get('production/raw-materials', [\App\Http\Controllers\Production\BomController::class, 'rawMaterials']);
+    Route::post('production/raw-materials', [\App\Http\Controllers\Production\BomController::class, 'storeRawMaterial']);
+    Route::get('production/boms', [\App\Http\Controllers\Production\BomController::class, 'boms']);
+    Route::post('production/boms', [\App\Http\Controllers\Production\BomController::class, 'storeBom']);
+    Route::get('production/boms/{bomId}', [\App\Http\Controllers\Production\BomController::class, 'showBom']);
+    Route::post('production/boms/calculate-materials', [\App\Http\Controllers\Production\BomController::class, 'calculateMaterials']);
+    Route::post('production/orders/start', [\App\Http\Controllers\Production\BomController::class, 'startProduction']);
+    Route::get('production/plans', [\App\Http\Controllers\Production\ProductionPlanningController::class, 'index']);
+    Route::post('production/plans', [\App\Http\Controllers\Production\ProductionPlanningController::class, 'store']);
+    Route::put('production/plans/{id}', [\App\Http\Controllers\Production\ProductionPlanningController::class, 'update']);
+    Route::delete('production/plans/{id}', [\App\Http\Controllers\Production\ProductionPlanningController::class, 'destroy']);
+    Route::post('production/plans/{id}/create-order', [\App\Http\Controllers\Production\ProductionPlanningController::class, 'createOrder']);
+    Route::get('production/execution/queue', [\App\Http\Controllers\Production\ProductionExecutionController::class, 'queue']);
+    Route::get('production/execution/active-batches', [\App\Http\Controllers\Production\ProductionExecutionController::class, 'activeBatches']);
+    Route::get('production/execution/batch-history', [\App\Http\Controllers\Production\ProductionExecutionController::class, 'batchHistory']);
+    Route::post('production/execution/start-batch', [\App\Http\Controllers\Production\ProductionExecutionController::class, 'startBatch']);
+    Route::put('production/execution/batches/{id}', [\App\Http\Controllers\Production\ProductionExecutionController::class, 'updateBatch']);
+    Route::get('production/qc-inspections', [\App\Http\Controllers\Production\QualityControlController::class, 'index']);
+    Route::post('production/qc-inspections', [\App\Http\Controllers\Production\QualityControlController::class, 'store']);
+    Route::put('production/qc-inspections/{id}', [\App\Http\Controllers\Production\QualityControlController::class, 'update']);
+    Route::get('production/packaging/approved-qc-batches', [\App\Http\Controllers\Production\PackagingManagementController::class, 'approvedQcBatches']);
+    Route::get('production/packaging/batches', [\App\Http\Controllers\Production\PackagingManagementController::class, 'index']);
+    Route::post('production/packaging/batches', [\App\Http\Controllers\Production\PackagingManagementController::class, 'store']);
+    Route::put('production/packaging/batches/{id}', [\App\Http\Controllers\Production\PackagingManagementController::class, 'update']);
 
     // Vehicle Loading Routes
     Route::apiResource('vehicle-loading/vehicles', \App\Http\Controllers\VehicleController::class);

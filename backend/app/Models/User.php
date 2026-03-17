@@ -76,4 +76,9 @@ class User extends Authenticatable
             $query->where('name', $permission);
         })->exists();
     }
+
+    public function outlet()
+    {
+        return $this->hasOne(Outlet::class);
+    }
 }

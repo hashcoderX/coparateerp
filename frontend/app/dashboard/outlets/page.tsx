@@ -125,6 +125,12 @@ export default function OutletsPage() {
               Back
             </button>
             <button
+              onClick={() => router.push('/dashboard/outlets/sales')}
+              className="px-4 py-2 border border-indigo-300 rounded-md text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+            >
+              Outlet Sales Tracking
+            </button>
+            <button
               onClick={() => router.push('/dashboard')}
               className="px-4 py-2 bg-violet-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-violet-700"
             >

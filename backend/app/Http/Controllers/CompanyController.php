@@ -8,6 +8,7 @@ use App\Models\Candidate;
 use App\Models\Department;
 use App\Models\Designation;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class CompanyController extends Controller
 {
@@ -32,9 +33,16 @@ class CompanyController extends Controller
             'website' => 'nullable|url',
             'country' => 'nullable|string|max:100',
             'currency' => 'nullable|string|max:10',
+            'logo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
-        $company = Company::create($request->all());
+        $payload = $request->only(['name', 'email', 'address', 'phone', 'website', 'country', 'currency']);
+
+        if ($request->hasFile('logo')) {
+            $payload['logo_path'] = $request->file('logo')->store('company-logos', 'public');
+        }
+
+        $company = Company::create($payload);
 
         return response()->json($company, 201);
     }
@@ -49,9 +57,20 @@ class CompanyController extends Controller
             'website' => 'nullable|url',
             'country' => 'nullable|string|max:100',
             'currency' => 'nullable|string|max:10',
+            'logo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
-        $company->update($request->all());
+        $payload = $request->only(['name', 'email', 'address', 'phone', 'website', 'country', 'currency']);
+
+        if ($request->hasFile('logo')) {
+            if ($company->logo_path && Storage::disk('public')->exists($company->logo_path)) {
+                Storage::disk('public')->delete($company->logo_path);
+            }
+
+            $payload['logo_path'] = $request->file('logo')->store('company-logos', 'public');
+        }
+
+        $company->update($payload);
 
         return response()->json($company);
     }
