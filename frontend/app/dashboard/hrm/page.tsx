@@ -272,6 +272,10 @@ export default function HRM() {
 
   const visibleHrmModules = hrmModules.filter((module) => {
     if (isAdminUser) return true;
+    if (module.name === 'Leaves') {
+      // All employees should be able to open leave requests.
+      return true;
+    }
     if (isSalesRefOnly) {
       return module.name === 'Leaves';
     }

@@ -20,6 +20,12 @@ export default function Designations() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingDesignation, setEditingDesignation] = useState<Designation | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [designationToDelete, setDesignationToDelete] = useState<Designation | null>(null);
+  const [showMessageModal, setShowMessageModal] = useState(false);
+  const [messageModalTitle, setMessageModalTitle] = useState('');
+  const [messageModalBody, setMessageModalBody] = useState('');
+  const [messageModalType, setMessageModalType] = useState<'error' | 'success'>('error');
   const router = useRouter();
 
   // Form fields
@@ -87,7 +93,10 @@ export default function Designations() {
       resetForm();
     } catch (error) {
       console.error('Error saving designation:', error);
-      alert('Failed to save designation. Please try again.');
+      setMessageModalType('error');
+      setMessageModalTitle('Save Failed');
+      setMessageModalBody('Failed to save designation. Please try again.');
+      setShowMessageModal(true);
     } finally {
       setLoading(false);
     }
@@ -100,18 +109,29 @@ export default function Designations() {
     setShowForm(true);
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this designation?')) return;
+  const handleDelete = (designation: Designation) => {
+    setDesignationToDelete(designation);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!designationToDelete) return;
 
     try {
-      await axios.delete(`${API_URL}/api/hr/designations/${id}`, {
+      await axios.delete(`${API_URL}/api/hr/designations/${designationToDelete.id}`, {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
       });
+      setShowDeleteModal(false);
+      setDesignationToDelete(null);
       fetchDesignations();
     } catch (error) {
       const err: any = error;
       console.error('Error deleting designation:', err?.response?.status, err?.response?.data || err?.message);
-      alert('Failed to delete designation. Please try again.');
+      setShowDeleteModal(false);
+      setMessageModalType('error');
+      setMessageModalTitle('Delete Failed');
+      setMessageModalBody('Failed to delete designation. Please try again.');
+      setShowMessageModal(true);
     }
   };
 
@@ -191,20 +211,6 @@ export default function Designations() {
                 <div className="text-sm text-gray-500">Total Designations</div>
               </div>
             </div>
-          </div>
-          <div className="md:flex-shrink-0">
-            <button
-              onClick={() => {
-                resetForm();
-                setShowForm(true);
-              }}
-              className="w-full md:w-auto bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-6 py-3 rounded-xl text-sm font-medium transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              <span>Add Designation</span>
-            </button>
           </div>
         </div>
 
@@ -297,9 +303,6 @@ export default function Designations() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                     Created
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                    Actions
-                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -314,32 +317,76 @@ export default function Designations() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {new Date(designation.created_at).toLocaleDateString()}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <button
-                        onClick={() => handleEdit(designation)}
-                        className="inline-flex items-center px-3 py-1 rounded-lg text-blue-600 hover:text-blue-800 hover:bg-blue-50 transition-colors duration-200 mr-2"
-                      >
-                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(designation.id)}
-                        className="inline-flex items-center px-3 py-1 rounded-lg text-red-600 hover:text-red-800 hover:bg-red-50 transition-colors duration-200"
-                      >
-                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                        Delete
-                      </button>
-                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </div>
+
+        {showDeleteModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-red-200">
+              <div className="px-5 py-4 bg-gradient-to-r from-red-500 to-pink-500">
+                <h4 className="text-white font-semibold">Confirm Deletion</h4>
+              </div>
+              <div className="p-5 space-y-3">
+                <p className="text-sm text-gray-700">
+                  Are you sure you want to delete
+                  <span className="font-semibold"> {designationToDelete?.name || 'this designation'}</span>?
+                </p>
+                <p className="text-xs text-red-700">This action cannot be undone.</p>
+              </div>
+              <div className="px-5 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setDesignationToDelete(null);
+                  }}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-sm font-semibold text-white hover:bg-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showMessageModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200">
+              <div
+                className={`px-5 py-4 ${
+                  messageModalType === 'error'
+                    ? 'bg-gradient-to-r from-red-500 to-pink-500'
+                    : 'bg-gradient-to-r from-emerald-500 to-cyan-500'
+                }`}
+              >
+                <h4 className="text-white font-semibold">{messageModalTitle}</h4>
+              </div>
+              <div className="p-5">
+                <p className="text-sm text-gray-700">{messageModalBody}</p>
+              </div>
+              <div className="px-5 py-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowMessageModal(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

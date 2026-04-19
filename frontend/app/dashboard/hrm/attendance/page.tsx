@@ -193,7 +193,9 @@ export default function AttendancePage() {
       const payload: any = { 
         employee_id: markingOutAttendance?.employee_id,
         out_time: outTime,
-        date: markingOutAttendance?.date ? new Date(markingOutAttendance.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+        date: markingOutAttendance?.date
+          ? String(markingOutAttendance.date).split('T')[0]
+          : new Date().toISOString().split('T')[0]
       };
       
       if (notes) payload.notes = notes;
@@ -248,7 +250,12 @@ export default function AttendancePage() {
         }
       );
       setUploadResult(response.data);
-      openNoticeModal('success', 'Upload Completed', `Upload processed. Created ${response.data.created_records} records.`);
+      openNoticeModal(
+        'success',
+        'Upload Completed',
+        `Upload processed. Created ${response.data.created_records || 0}, Updated ${response.data.updated_records || 0}.`
+      );
+      fetchTodayAttendance();
     } catch (error: any) {
       console.error('Error uploading CSV:', error);
       openNoticeModal('error', 'Upload Failed', 'Failed to upload CSV: ' + (error.response?.data?.error || error.message));
@@ -528,8 +535,12 @@ export default function AttendancePage() {
           <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-8">
             <h3 className="text-2xl font-bold text-gray-900 mb-4">Upload Attendance CSV</h3>
             <p className="text-gray-600 mb-6">
-              Upload a CSV file from your fingerprint machine. Expected columns: employee_code, date, in_time, out_time, status, notes
+              Upload a CSV from your fingerprint machine. Supported headers include both legacy format and fingerprint format.
             </p>
+            <div className="mb-6 p-4 rounded-xl bg-orange-50 border border-orange-200 text-sm text-gray-700">
+              <p className="font-semibold text-orange-800 mb-2">Fingerprint sample format:</p>
+              <p>Employee_ID, Employee_Name, Date, Check_In, Check_Out, Total_Hours, Status, Device_ID</p>
+            </div>
             <div className="mb-6">
               <input
                 type="file"
@@ -548,7 +559,11 @@ export default function AttendancePage() {
             {uploadResult && (
               <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
                 <h4 className="font-semibold text-green-800">Upload Result</h4>
-                <p className="text-green-700">Created {uploadResult.created_records} records</p>
+                <p className="text-green-700">Created {uploadResult.created_records || 0} records</p>
+                <p className="text-green-700">Updated {uploadResult.updated_records || 0} records</p>
+                {typeof uploadResult.skipped_rows === 'number' && (
+                  <p className="text-amber-700">Skipped empty rows: {uploadResult.skipped_rows}</p>
+                )}
                 {uploadResult.errors.length > 0 && (
                   <div className="mt-2">
                     <p className="text-red-700 font-semibold">Errors:</p>

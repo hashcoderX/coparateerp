@@ -102,8 +102,12 @@ export default function DistributionPaymentHistoryReportPage() {
           roleBlob.includes('admin');
 
         const hasReportPermission = permissionNames.some((permission: string) => permission.includes('report'));
+        const isSalesRef =
+          roleBlob.includes('sales ref') ||
+          roleBlob.includes('sales representative') ||
+          roleBlob.includes('sales_ref');
 
-        if (!isAdminUser && !hasReportPermission) {
+        if (!isAdminUser && !hasReportPermission && !isSalesRef) {
           router.push('/dashboard');
           return;
         }

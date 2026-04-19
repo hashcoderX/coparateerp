@@ -13,12 +13,15 @@ class OutletSaleItem extends Model
         'item_code',
         'item_name',
         'unit',
+        'issue_type',
+        'discount_amount',
         'quantity',
         'unit_price',
         'line_total',
     ];
 
     protected $casts = [
+        'discount_amount' => 'decimal:2',
         'quantity' => 'decimal:2',
         'unit_price' => 'decimal:2',
         'line_total' => 'decimal:2',

@@ -54,6 +54,17 @@ class RolePermissionSeeder extends Seeder
             ['name' => 'edit_candidates', 'description' => 'Edit candidates', 'module' => 'Candidate Management'],
             ['name' => 'delete_candidates', 'description' => 'Delete candidates', 'module' => 'Candidate Management'],
 
+            // Accounts Management
+            ['name' => 'accounts.view_main_account', 'description' => 'View main account', 'module' => 'accounts'],
+            ['name' => 'accounts.manage_main_account', 'description' => 'Manage main account transactions', 'module' => 'accounts'],
+            ['name' => 'accounts.view_transaction_book', 'description' => 'View transaction book', 'module' => 'accounts'],
+            ['name' => 'accounts.manage_transaction_book', 'description' => 'Manage transaction book', 'module' => 'accounts'],
+            ['name' => 'accounts.view_petty_cash', 'description' => 'View petty cash', 'module' => 'accounts'],
+            ['name' => 'accounts.manage_petty_cash', 'description' => 'Manage petty cash', 'module' => 'accounts'],
+            ['name' => 'accounts.view_delivery_cash', 'description' => 'View delivery cash', 'module' => 'accounts'],
+            ['name' => 'accounts.manage_delivery_cash', 'description' => 'Manage delivery cash', 'module' => 'accounts'],
+            ['name' => 'accounts.approve_outlet_funds', 'description' => 'Approve outlet fund requests', 'module' => 'accounts'],
+
             // Role Management
             ['name' => 'view_roles', 'description' => 'View roles', 'module' => 'Role Management'],
             ['name' => 'create_roles', 'description' => 'Create roles', 'module' => 'Role Management'],

@@ -16,6 +16,17 @@ interface LoadItemInfo {
   sell_price: number;
 }
 
+interface LoadItemSuggestion {
+  load_item_id: number;
+  inventory_item_id: number;
+  item_code: string;
+  item_name: string;
+  unit: string;
+  load_qty: number;
+  sell_price: number;
+  warehouse_stock: number;
+}
+
 interface InvoiceItem {
   id: number;
   inventory_item_id: number | null;
@@ -44,6 +55,7 @@ interface InvoiceRecord {
 }
 
 interface InvoiceLine {
+  line_id: string;
   inventory_item_id: number;
   item_code: string;
   item_name: string;
@@ -53,7 +65,8 @@ interface InvoiceLine {
   base_unit_price?: number;
   item_discount?: number;
   free_quantity?: number;
-   paid_quantity?: number;
+  paid_quantity?: number;
+  source_load_item_id?: number | null;
 }
 
 interface ReturnLine {
@@ -87,10 +100,11 @@ interface PendingOfflineInvoice {
     }[];
     payment?: {
       amount: number;
-      method: 'cash' | 'check' | 'bank_transfer';
+      method: 'cash' | 'check' | 'bank_transfer' | 'bill_to_bill';
       date: string;
       reference?: string | null;
       bank_name?: string | null;
+      target_invoice_id?: number | null;
     } | null;
     returnPayload?: {
       return_number: string;
@@ -166,6 +180,7 @@ export default function DistributionInvoicesPage() {
   const [notes, setNotes] = useState('');
 
   const [selectedItemId, setSelectedItemId] = useState('');
+  const [selectedLoadItemId, setSelectedLoadItemId] = useState('');
   const [itemSearch, setItemSearch] = useState('');
   const [showItemDropdown, setShowItemDropdown] = useState(false);
   const [highlightedItemIndex, setHighlightedItemIndex] = useState(-1);
@@ -193,8 +208,9 @@ export default function DistributionInvoicesPage() {
   const [lineItemDiscount, setLineItemDiscount] = useState('');
 
   const [addPayment, setAddPayment] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'check' | 'bank_transfer'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'check' | 'bank_transfer' | 'bill_to_bill'>('cash');
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [lastBillAmount, setLastBillAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentBankName, setPaymentBankName] = useState('');
@@ -205,17 +221,22 @@ export default function DistributionInvoicesPage() {
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceDateFilter, setInvoiceDateFilter] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
+  const [customerPickerSearch, setCustomerPickerSearch] = useState('');
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [highlightedCustomerIndex, setHighlightedCustomerIndex] = useState(-1);
   const [loadItems, setLoadItems] = useState<LoadItemInfo[]>([]);
   const [inlineReturnMode, setInlineReturnMode] = useState<'deduct' | 'exchange'>('deduct');
 
   const [qtyWarningOpen, setQtyWarningOpen] = useState(false);
   const [qtyWarningMessage, setQtyWarningMessage] = useState('');
+  const [deleteConfirmInvoice, setDeleteConfirmInvoice] = useState<InvoiceRecord | null>(null);
 
-  const [editingLineId, setEditingLineId] = useState<number | null>(null);
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [editingReturnId, setEditingReturnId] = useState<number | null>(null);
 
   const [posPrintInvoice, setPosPrintInvoice] = useState<InvoiceRecord | null>(null);
   const posPrintRef = useRef<HTMLDivElement | null>(null);
+  const customerPickerRef = useRef<HTMLDivElement | null>(null);
 
   const [pendingOfflineInvoices, setPendingOfflineInvoices] = useState<PendingOfflineInvoice[]>([]);
   const [syncingOfflineInvoices, setSyncingOfflineInvoices] = useState(false);
@@ -227,6 +248,7 @@ export default function DistributionInvoicesPage() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
 
   const router = useRouter();
+  const createLineId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -458,6 +480,31 @@ export default function DistributionInvoicesPage() {
   const generatePaymentNumber = () => `PAY-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
   const generateReturnNumber = () => `RET-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`;
 
+  const getInvoiceDueBalance = (invoice: any): number => {
+    const explicitDue = Number(invoice?.due_amount ?? invoice?.balance_amount ?? 0);
+    if (explicitDue > 0) return explicitDue;
+
+    const total = Number(invoice?.total ?? 0);
+    const paid = Number(invoice?.paid_amount ?? 0);
+    const derived = total - paid;
+    return derived > 0 ? derived : 0;
+  };
+
+  const getLastUnpaidInvoiceForCustomer = (targetCustomerId: number, excludeInvoiceId?: number | null) => {
+    const candidates = invoices
+      .filter((inv) => Number(inv.customer_id) === targetCustomerId)
+      .filter((inv) => !excludeInvoiceId || Number(inv.id) !== Number(excludeInvoiceId))
+      .filter((inv) => !['cancelled', 'paid'].includes(String(inv.status || '').toLowerCase()))
+      .filter((inv) => getInvoiceDueBalance(inv) > 0)
+      .sort((a, b) => {
+        const aTime = new Date(a.invoice_date || 0).getTime();
+        const bTime = new Date(b.invoice_date || 0).getTime();
+        return bTime - aTime;
+      });
+
+    return candidates[0] || null;
+  };
+
   const syncOfflineInvoices = async () => {
     if (!token || syncingOfflineInvoices || pendingOfflineInvoices.length === 0) return;
     setSyncingOfflineInvoices(true);
@@ -483,17 +530,27 @@ export default function DistributionInvoicesPage() {
 
           if (inv.payment && createdInvoice?.id) {
             try {
+              const targetInvoiceId = inv.payment.method === 'bill_to_bill'
+                ? Number(inv.payment.target_invoice_id || 0)
+                : Number(createdInvoice.id);
+
+              if (inv.payment.method === 'bill_to_bill' && !targetInvoiceId) {
+                throw new Error('Missing target invoice for bill-to-bill sync.');
+              }
+
               await axios.post('http://localhost:8000/api/distribution/payments', {
                 payment_number: generatePaymentNumber(),
-                distribution_invoice_id: createdInvoice.id,
+                distribution_invoice_id: targetInvoiceId,
                 customer_id: createdInvoice.customer_id ?? inv.customer_id,
                 payment_date: inv.payment.date,
                 amount: inv.payment.amount,
-                payment_method: inv.payment.method,
+                payment_method: inv.payment.method === 'bill_to_bill' ? 'cash' : inv.payment.method,
                 reference_no: inv.payment.reference || null,
                 bank_name: inv.payment.bank_name || null,
                 status: 'received',
-                notes: `Auto payment from invoice ${createdInvoice.invoice_number} (offline sync)`,
+                notes: inv.payment.method === 'bill_to_bill'
+                  ? `Bill to bill settlement from invoice ${createdInvoice.invoice_number} (offline sync)`
+                  : `Auto payment from invoice ${createdInvoice.invoice_number} (offline sync)`,
               }, { headers: { Authorization: `Bearer ${token}` } });
             } catch (paymentError) {
               console.error('Failed to sync offline payment for invoice:', paymentError);
@@ -625,7 +682,14 @@ export default function DistributionInvoicesPage() {
   }, [token, pendingOfflineInvoices.length]);
 
   const addLine = () => {
-    const selected = items.find((item) => item.id === Number(selectedItemId));
+    const selectedInventory = items.find((item) => item.id === Number(selectedItemId));
+    const selectedLoadEntry = selectedLoadItemId
+      ? loadItems.find((li) => String(li.id) === String(selectedLoadItemId))
+      : null;
+    const selectedCode = selectedLoadEntry?.product_code || selectedInventory?.code;
+    const selected = selectedCode
+      ? items.find((item) => item.code === selectedCode) || selectedInventory
+      : selectedInventory;
     const paidQty = Number(lineQty);
     const freeQty = Number(lineFreeQty) || 0;
     const discountPerUnit = Number(lineItemDiscount) || 0;
@@ -648,7 +712,7 @@ export default function DistributionInvoicesPage() {
     }
 
     const activeLoadNumeric = Number(activeLoadId) || undefined;
-    const matchingLoad = loadItems.find(
+    const matchingLoad = selectedLoadEntry || loadItems.find(
       (li) =>
         li.product_code === selected.code &&
         (!activeLoadNumeric || li.load_id === activeLoadNumeric)
@@ -656,7 +720,7 @@ export default function DistributionInvoicesPage() {
 
     if (matchingLoad) {
       const alreadyOnInvoice = lines
-        .filter((line) => line.inventory_item_id === selected.id)
+        .filter((line) => line.source_load_item_id === matchingLoad.id)
         .reduce((sum, line) => sum + line.quantity, 0);
 
       const remainingFromLoad = Number(matchingLoad.qty) - alreadyOnInvoice;
@@ -688,6 +752,7 @@ export default function DistributionInvoicesPage() {
       const existingIndex = prev.findIndex(
         (line) =>
           line.inventory_item_id === selected.id &&
+          (line.source_load_item_id || null) === (matchingLoad?.id || null) &&
           (line.item_discount || 0) === discountPerUnit &&
           (line.base_unit_price || line.unit_price) === basePrice
       );
@@ -712,6 +777,7 @@ export default function DistributionInvoicesPage() {
       return [
         ...prev,
         {
+          line_id: createLineId(),
           inventory_item_id: selected.id,
           item_code: selected.code,
           item_name: selected.name,
@@ -722,11 +788,13 @@ export default function DistributionInvoicesPage() {
           item_discount: discountPerUnit,
           free_quantity: freeQty,
           paid_quantity: paidQty,
+          source_load_item_id: matchingLoad?.id || null,
         },
       ];
     });
 
     setSelectedItemId('');
+    setSelectedLoadItemId('');
     setItemSearch('');
     setShowItemDropdown(false);
     setHighlightedItemIndex(-1);
@@ -735,7 +803,7 @@ export default function DistributionInvoicesPage() {
     setLineItemDiscount('');
   };
 
-  const removeLine = (id: number) => setLines((prev) => prev.filter((line) => line.inventory_item_id !== id));
+  const removeLine = (lineId: string) => setLines((prev) => prev.filter((line) => line.line_id !== lineId));
 
   const subtotal = useMemo(
     () =>
@@ -750,9 +818,9 @@ export default function DistributionInvoicesPage() {
     [lines]
   );
 
-  const updateLineQuantities = (itemId: number, newPaid: number, newFree: number) => {
+  const updateLineQuantities = (lineId: string, newPaid: number, newFree: number) => {
     setLines((prev) => {
-      const line = prev.find((l) => l.inventory_item_id === itemId);
+      const line = prev.find((l) => l.line_id === lineId);
       if (!line) return prev;
 
       const paidQty = newPaid;
@@ -766,15 +834,17 @@ export default function DistributionInvoicesPage() {
       }
 
       const activeLoadNumeric = Number(activeLoadId) || undefined;
-      const matchingLoad = loadItems.find(
-        (li) =>
-          li.product_code === line.item_code &&
-          (!activeLoadNumeric || li.load_id === activeLoadNumeric)
-      );
+      const matchingLoad = line.source_load_item_id
+        ? loadItems.find((li) => li.id === line.source_load_item_id)
+        : loadItems.find(
+            (li) =>
+              li.product_code === line.item_code &&
+              (!activeLoadNumeric || li.load_id === activeLoadNumeric)
+          );
 
       if (matchingLoad) {
         const otherLinesTotal = prev
-          .filter((l) => l.inventory_item_id === itemId && l !== line)
+          .filter((l) => l.source_load_item_id === matchingLoad.id && l.line_id !== line.line_id)
           .reduce((sum, l) => sum + l.quantity, 0);
 
         const remainingFromLoad = Number(matchingLoad.qty) - otherLinesTotal;
@@ -801,7 +871,7 @@ export default function DistributionInvoicesPage() {
       }
 
       return prev.map((l) => {
-        if (l.inventory_item_id !== itemId) return l;
+        if (l.line_id !== lineId) return l;
         return {
           ...l,
           quantity: paidQty + freeQty,
@@ -812,10 +882,10 @@ export default function DistributionInvoicesPage() {
     });
   };
 
-  const updateLineDiscount = (itemId: number, newDiscount: number) => {
+  const updateLineDiscount = (lineId: string, newDiscount: number) => {
     setLines((prev) =>
       prev.map((line) => {
-        if (line.inventory_item_id !== itemId) return line;
+        if (line.line_id !== lineId) return line;
         const base =
           typeof line.base_unit_price === 'number'
             ? line.base_unit_price
@@ -831,10 +901,10 @@ export default function DistributionInvoicesPage() {
     );
   };
 
-  const updateLineUnitPrice = (itemId: number, newPrice: number) => {
+  const updateLineUnitPrice = (lineId: string, newPrice: number) => {
     setLines((prev) =>
       prev.map((line) => {
-        if (line.inventory_item_id !== itemId) return line;
+        if (line.line_id !== lineId) return line;
         const price = Math.max(0, newPrice);
         const base =
           typeof line.base_unit_price === 'number'
@@ -876,6 +946,26 @@ export default function DistributionInvoicesPage() {
     if (!assignedRouteId) return customers;
     return customers.filter((customer) => String(customer.route_id || '') === assignedRouteId);
   }, [customers, assignedRouteId]);
+
+  const selectedCustomer = useMemo(
+    () => scopedCustomers.find((customer) => customer.id === Number(customerId)) || null,
+    [scopedCustomers, customerId]
+  );
+
+  const customerSuggestions = useMemo(() => {
+    const term = customerPickerSearch.trim().toLowerCase();
+    const source = scopedCustomers;
+
+    const filtered = !term
+      ? source
+      : source.filter((customer) => {
+          const shopName = String(customer.shop_name || '').toLowerCase();
+          const code = String(customer.customer_code || '').toLowerCase();
+          return shopName.includes(term) || code.includes(term);
+        });
+
+    return filtered.slice(0, 12);
+  }, [scopedCustomers, customerPickerSearch]);
 
   const scopedCustomerIdSet = useMemo(() => new Set(scopedCustomers.map((customer) => customer.id)), [scopedCustomers]);
   const customerNameById = useMemo(() => {
@@ -953,12 +1043,51 @@ export default function DistributionInvoicesPage() {
 
   const filteredItems = useMemo(() => {
     const search = itemSearch.trim().toLowerCase();
-    if (!search) return [];
-    return items
-      .filter((item) => item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search))
+    if (!search) return [] as LoadItemSuggestion[];
+
+    const inventoryByCode = new Map(items.map((item) => [item.code, item] as const));
+
+    return loadItems
+      .filter((loadItem) => !activeLoadId || String(loadItem.load_id) === String(activeLoadId))
+      .map((loadItem) => {
+        const matchedInventory = inventoryByCode.get(loadItem.product_code);
+        if (!matchedInventory) return null;
+
+        return {
+          load_item_id: loadItem.id,
+          inventory_item_id: matchedInventory.id,
+          item_code: matchedInventory.code,
+          item_name: loadItem.name || matchedInventory.name,
+          unit: matchedInventory.unit,
+          load_qty: Number(loadItem.qty) || 0,
+          sell_price: loadItem.sell_price > 0 ? loadItem.sell_price : matchedInventory.sell_price,
+          warehouse_stock: Number(matchedInventory.current_stock) || 0,
+        } as LoadItemSuggestion;
+      })
+      .filter((item): item is LoadItemSuggestion => item !== null)
+      .filter((item) =>
+        item.item_code.toLowerCase().includes(search) || item.item_name.toLowerCase().includes(search)
+      )
       .slice(0, 8);
-  }, [itemSearch, items]);
-  const selectedItem = items.find((item) => item.id === Number(selectedItemId)) || null;
+  }, [itemSearch, loadItems, items, activeLoadId]);
+  const selectedItem = useMemo(() => {
+    if (selectedLoadItemId) {
+      const selectedLoadRow = loadItems.find((li) => String(li.id) === String(selectedLoadItemId));
+      if (selectedLoadRow) {
+        const matchedInventory = items.find((item) => item.code === selectedLoadRow.product_code);
+        if (matchedInventory) {
+          return {
+            ...matchedInventory,
+            name: selectedLoadRow.name || matchedInventory.name,
+            sell_price: selectedLoadRow.sell_price > 0 ? selectedLoadRow.sell_price : matchedInventory.sell_price,
+            current_stock: Number(selectedLoadRow.qty) || 0,
+          } as Item;
+        }
+      }
+    }
+
+    return items.find((item) => item.id === Number(selectedItemId)) || null;
+  }, [selectedLoadItemId, selectedItemId, loadItems, items]);
   const discountAmount = useMemo(() => {
     const value = Number(discountValue) || 0;
     if (discountType === 'percentage') {
@@ -996,16 +1125,6 @@ export default function DistributionInvoicesPage() {
       )
       .slice(0, 8);
   }, [returnSearch, items]);
-  const loadQtyByCode = useMemo(() => {
-    const map = new Map<string, number>();
-    loadItems.forEach((li) => {
-      if (li && typeof li.product_code === 'string') {
-        map.set(li.product_code, Number(li.qty) || 0);
-      }
-    });
-    return map;
-  }, [loadItems]);
-
   const resetInvoiceForm = () => {
     setInvoiceNumber(generateInvoiceNumber());
     setCustomerId('');
@@ -1014,7 +1133,11 @@ export default function DistributionInvoicesPage() {
     setDiscountType('amount');
     setDiscountValue('0');
     setNotes('');
+    setCustomerPickerSearch('');
+    setShowCustomerPicker(false);
+    setHighlightedCustomerIndex(-1);
     setSelectedItemId('');
+    setSelectedLoadItemId('');
     setItemSearch('');
     setShowItemDropdown(false);
     setHighlightedItemIndex(-1);
@@ -1031,6 +1154,7 @@ export default function DistributionInvoicesPage() {
     setAddPayment(false);
     setPaymentMethod('cash');
     setPaymentAmount('');
+    setLastBillAmount('');
     setPaymentDate(new Date().toISOString().split( 'T')[0]);
     setPaymentReference('');
     setPaymentBankName('');
@@ -1055,6 +1179,16 @@ export default function DistributionInvoicesPage() {
 
     setInvoiceNumber(invoice.invoice_number);
     setCustomerId(String(invoice.customer_id));
+    setSelectedLoadItemId('');
+    const editShopName = String(invoice.customer?.shop_name || '').trim();
+    const editShopCode = String(invoice.customer?.customer_code || '').trim();
+    if (editShopName) {
+      setCustomerPickerSearch(editShopCode ? `${editShopName} (${editShopCode})` : editShopName);
+    } else {
+      setCustomerPickerSearch('');
+    }
+    setShowCustomerPicker(false);
+    setHighlightedCustomerIndex(-1);
 
     const rawInvoiceDate = invoice.invoice_date || '';
     setInvoiceDate(rawInvoiceDate.length >= 10 ? rawInvoiceDate.substring(0, 10) : rawInvoiceDate);
@@ -1078,15 +1212,17 @@ export default function DistributionInvoicesPage() {
     setAddPayment(false);
     setPaymentMethod('cash');
     setPaymentAmount('');
+    setLastBillAmount('');
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setPaymentReference('');
     setPaymentBankName('');
 
-    const mappedLines: InvoiceLine[] = (invoice.items || []).map((it) => {
+    const mappedLines: InvoiceLine[] = (invoice.items || []).map((it, index) => {
       const qty = Number(it.quantity) || 0;
       const unitPrice = Number(it.unit_price) || 0;
       const itemDiscount = Number(it.discount) || 0;
       return {
+        line_id: `${invoice.id}-${index}`,
         inventory_item_id: it.inventory_item_id ?? 0,
         item_code: it.item_code,
         item_name: it.item_name,
@@ -1097,6 +1233,7 @@ export default function DistributionInvoicesPage() {
         item_discount: itemDiscount,
         free_quantity: 0,
         paid_quantity: qty,
+        source_load_item_id: null,
       };
     });
 
@@ -1112,16 +1249,18 @@ export default function DistributionInvoicesPage() {
       return;
     }
 
-    if (typeof window !== 'undefined') {
-      const confirmed = window.confirm(`Delete invoice ${invoice.invoice_number}? This cannot be undone.`);
-      if (!confirmed) return;
-    }
+    setDeleteConfirmInvoice(invoice);
+  };
+
+  const confirmDeleteInvoice = async () => {
+    if (!deleteConfirmInvoice) return;
 
     try {
-      await axios.delete(`http://localhost:8000/api/distribution/invoices/${invoice.id}`, {
+      await axios.delete(`http://localhost:8000/api/distribution/invoices/${deleteConfirmInvoice.id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      setDeleteConfirmInvoice(null);
       await fetchData();
     } catch (error: any) {
       setQtyWarningMessage(error?.response?.data?.message || 'Failed to delete invoice');
@@ -1134,12 +1273,65 @@ export default function DistributionInvoicesPage() {
     resetInvoiceForm();
     if (assignedRouteId && scopedCustomers.length === 1) {
       setCustomerId(String(scopedCustomers[0].id));
+      const onlyCustomer = scopedCustomers[0];
+      setCustomerPickerSearch(`${onlyCustomer.shop_name} (${onlyCustomer.customer_code})`);
     }
     setShowModal(true);
   };
 
+  useEffect(() => {
+    if (!showModal || !addPayment || paymentMethod !== 'bill_to_bill') return;
+
+    const selectedCustomerId = Number(customerId || 0);
+    if (!selectedCustomerId) {
+      setLastBillAmount('');
+      return;
+    }
+
+    const lastInvoice = getLastUnpaidInvoiceForCustomer(selectedCustomerId, editingInvoiceId);
+    if (!lastInvoice) {
+      setLastBillAmount('');
+      return;
+    }
+
+    const due = getInvoiceDueBalance(lastInvoice);
+    if (due > 0) {
+      setLastBillAmount(due.toFixed(2));
+    }
+  }, [showModal, addPayment, paymentMethod, customerId, invoices, editingInvoiceId]);
+
+  useEffect(() => {
+    if (!showModal) return;
+    if (!customerId) return;
+    if (customerPickerSearch.trim()) return;
+
+    const selected = scopedCustomers.find((customer) => customer.id === Number(customerId));
+    if (selected) {
+      setCustomerPickerSearch(`${selected.shop_name} (${selected.customer_code})`);
+    }
+  }, [showModal, customerId, customerPickerSearch, scopedCustomers]);
+
+  useEffect(() => {
+    if (!showModal || !showCustomerPicker) return;
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!customerPickerRef.current) return;
+      const target = event.target as Node;
+      if (!customerPickerRef.current.contains(target)) {
+        setShowCustomerPicker(false);
+        setHighlightedCustomerIndex(-1);
+      }
+    };
+
+    document.addEventListener('mousedown', handleDocumentClick);
+    return () => document.removeEventListener('mousedown', handleDocumentClick);
+  }, [showModal, showCustomerPicker]);
+
   const submitInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isEditing = editingInvoiceId !== null;
+    const billToBillAmount = Number(lastBillAmount || 0);
+    const hasBillToBillSettlement = addPayment && paymentMethod === 'bill_to_bill' && billToBillAmount > 0;
     if (!customerId || lines.length === 0) {
       setQtyWarningMessage('Select customer and add at least one item line.');
       setQtyWarningOpen(true);
@@ -1152,10 +1344,38 @@ export default function DistributionInvoicesPage() {
       return;
     }
 
-    if (addPayment) {
+    if (addPayment && paymentMethod !== 'bill_to_bill') {
       const amt = Number(paymentAmount);
       if (!amt || amt <= 0) {
         setQtyWarningMessage('Enter a valid payment amount.');
+        setQtyWarningOpen(true);
+        return;
+      }
+    }
+
+    if (hasBillToBillSettlement) {
+      if (isEditing) {
+        setQtyWarningMessage('Bill To Bill option is available for new invoices only.');
+        setQtyWarningOpen(true);
+        return;
+      }
+
+      const lastInvoice = getLastUnpaidInvoiceForCustomer(Number(customerId), editingInvoiceId);
+      if (!lastInvoice) {
+        setQtyWarningMessage('No previous unpaid bill found for this customer.');
+        setQtyWarningOpen(true);
+        return;
+      }
+
+      const due = getInvoiceDueBalance(lastInvoice);
+      if (due <= 0) {
+        setQtyWarningMessage('Last bill has no due balance to settle.');
+        setQtyWarningOpen(true);
+        return;
+      }
+
+      if (billToBillAmount > due + 1e-9) {
+        setQtyWarningMessage(`Last bill due is ${due.toFixed(2)}. Enter an amount up to due balance.`);
         setQtyWarningOpen(true);
         return;
       }
@@ -1201,6 +1421,42 @@ export default function DistributionInvoicesPage() {
               ? 'Return mode: DEDUCT FROM INVOICE'
               : 'Return mode: EXCHANGE ONLY (no deduction from invoice)'
           );
+        }
+
+        if (addPayment) {
+          parts.push('[PAYMENT EVIDENCE]');
+
+          if (paymentMethod === 'bill_to_bill') {
+            const settlementAmount = Number(lastBillAmount || 0);
+            const previousInvoice = settlementAmount > 0
+              ? getLastUnpaidInvoiceForCustomer(Number(customerId), editingInvoiceId)
+              : null;
+
+            if (settlementAmount > 0) {
+              parts.push('Payment mode: BILL TO BILL');
+              parts.push(`Last bill amount paid: ${settlementAmount.toFixed(2)}`);
+              if (previousInvoice?.invoice_number) {
+                parts.push(`Settled invoice: ${previousInvoice.invoice_number}`);
+              }
+              parts.push(`Payment date: ${paymentDate || invoiceDate}`);
+              if (paymentReference.trim()) {
+                parts.push(`Reference: ${paymentReference.trim()}`);
+              }
+            } else {
+              parts.push('Payment mode: CREDIT');
+              parts.push('No settlement amount entered. This invoice remains credit.');
+            }
+          } else {
+            const normalAmount = Number(paymentAmount || 0);
+            if (normalAmount > 0) {
+              parts.push(`Payment mode: ${String(paymentMethod || '').toUpperCase()}`);
+              parts.push(`Amount paid: ${normalAmount.toFixed(2)}`);
+              parts.push(`Payment date: ${paymentDate || invoiceDate}`);
+              if (paymentReference.trim()) {
+                parts.push(`Reference: ${paymentReference.trim()}`);
+              }
+            }
+          }
         }
 
       return parts.join('\n');
@@ -1253,15 +1509,34 @@ export default function DistributionInvoicesPage() {
       items: itemsPayload,
     };
 
-    const paymentPayload = addPayment
-      ? {
-          amount: Number(paymentAmount),
+    const targetLastInvoice = hasBillToBillSettlement
+      ? getLastUnpaidInvoiceForCustomer(Number(customerId), editingInvoiceId)
+      : null;
+
+    const paymentPayload = (() => {
+      if (!addPayment) return null;
+
+      if (paymentMethod === 'bill_to_bill') {
+        if (!hasBillToBillSettlement) return null;
+        return {
+          amount: billToBillAmount,
           method: paymentMethod,
           date: paymentDate || invoiceDate,
           reference: paymentReference || null,
           bank_name: paymentBankName || null,
-        }
-      : null;
+          target_invoice_id: Number(targetLastInvoice?.id || 0),
+        };
+      }
+
+      return {
+        amount: Number(paymentAmount),
+        method: paymentMethod,
+        date: paymentDate || invoiceDate,
+        reference: paymentReference || null,
+        bank_name: paymentBankName || null,
+        target_invoice_id: null,
+      };
+    })();
 
     const queueOfflineAndFinish = () => {
       const hasReturns = returnLines.length > 0;
@@ -1337,8 +1612,6 @@ export default function DistributionInvoicesPage() {
       setQtyWarningOpen(true);
     };
 
-    const isEditing = editingInvoiceId !== null;
-
     if (!isEditing && typeof navigator !== 'undefined' && !navigator.onLine) {
       queueOfflineAndFinish();
       return;
@@ -1373,17 +1646,27 @@ export default function DistributionInvoicesPage() {
 
       if (paymentPayload && savedInvoice?.id) {
         try {
+          const targetInvoiceId = paymentPayload.method === 'bill_to_bill'
+            ? Number(paymentPayload.target_invoice_id || 0)
+            : Number(savedInvoice.id);
+
+          if (paymentPayload.method === 'bill_to_bill' && !targetInvoiceId) {
+            throw new Error('Missing previous invoice for bill to bill settlement.');
+          }
+
           await axios.post('http://localhost:8000/api/distribution/payments', {
             payment_number: generatePaymentNumber(),
-            distribution_invoice_id: savedInvoice.id,
+            distribution_invoice_id: targetInvoiceId,
             customer_id: savedInvoice.customer_id ?? Number(customerId),
             payment_date: paymentPayload.date,
             amount: paymentPayload.amount,
-            payment_method: paymentPayload.method,
+            payment_method: paymentPayload.method === 'bill_to_bill' ? 'cash' : paymentPayload.method,
             reference_no: paymentPayload.reference || null,
             bank_name: paymentPayload.bank_name || null,
             status: 'received',
-            notes: `Auto payment from invoice ${savedInvoice.invoice_number}`,
+            notes: paymentPayload.method === 'bill_to_bill'
+              ? `Bill to bill settlement from invoice ${savedInvoice.invoice_number}`
+              : `Auto payment from invoice ${savedInvoice.invoice_number}`,
           }, { headers: { Authorization: `Bearer ${token}` } });
         } catch (paymentError: any) {
           console.error('Failed to record payment for invoice:', paymentError);
@@ -1856,12 +2139,12 @@ export default function DistributionInvoicesPage() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-gray-700 bg-opacity-60 z-50 flex items-end md:items-center justify-center">
-          <div className="relative w-full h-[90vh] md:h-auto md:w-11/12 max-w-5xl mx-auto bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-gray-200 overflow-hidden md:max-h-[90vh] flex flex-col">
-            <div className="flex items-start justify-between px-4 md:px-6 pt-4 pb-3 border-b border-gray-100 bg-gray-50/70 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 px-2 py-3 backdrop-blur-sm md:items-center md:px-4">
+          <div className="relative mx-auto flex h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/70 bg-white/92 shadow-[0_35px_120px_-45px_rgba(16,185,129,0.6)] md:h-auto md:max-h-[92vh]">
+            <div className="flex items-start justify-between border-b border-slate-200/80 bg-gradient-to-r from-emerald-50/80 via-white to-cyan-50/70 px-4 pb-3 pt-4 backdrop-blur-sm md:px-6">
               <div>
-                <h3 className="text-base sm:text-lg md:text-xl font-semibold text-gray-900">Create Invoice</h3>
-                <p className="mt-0.5 text-xs sm:text-sm text-gray-500">Select shop, add items, and optionally record payment in one flow.</p>
+                <h3 className="text-base font-bold tracking-tight text-slate-900 sm:text-lg md:text-xl">Create Invoice</h3>
+                <p className="mt-0.5 text-xs text-slate-600 sm:text-sm">Select shop, add items, and optionally record payment in one flow.</p>
               </div>
               <button
                 type="button"
@@ -1869,7 +2152,7 @@ export default function DistributionInvoicesPage() {
                   setShowModal(false);
                   resetInvoiceForm();
                 }}
-                className="ml-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                className="ml-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
                 aria-label="Close"
               >
                 ✕
@@ -1878,13 +2161,13 @@ export default function DistributionInvoicesPage() {
 
             <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-4 md:pb-6">
               <form onSubmit={submitInvoice} className="space-y-6 pt-4">
-                <section className="rounded-xl border border-gray-200 bg-gray-50/80 p-3 sm:p-4">
+                <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50/80 via-white to-cyan-50/50 p-3 shadow-sm sm:p-4">
                   <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <div>
-                      <h4 className="text-sm font-semibold text-gray-900">Invoice details</h4>
-                      <p className="text-xs text-gray-500">Basic information for this bill.</p>
+                      <h4 className="text-sm font-semibold text-slate-900">Invoice details</h4>
+                      <p className="text-xs text-slate-500">Basic information for this bill.</p>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <div className="flex items-center gap-2 text-xs text-slate-600">
                       <span className="inline-flex h-2 w-2 rounded-full bg-green-500"></span>
                       <span>{assignedRouteId ? 'Auto route filter active' : 'No route filter'}</span>
                     </div>
@@ -1897,24 +2180,119 @@ export default function DistributionInvoicesPage() {
                         value={invoiceNumber}
                         onChange={(e) => setInvoiceNumber(e.target.value)}
                         required
-                        className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                        className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100"
                       />
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-gray-700 mb-1">Shop</label>
-                      <select
-                        value={customerId}
-                        onChange={(e) => setCustomerId(e.target.value)}
-                        required
-                        className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
-                      >
-                        <option value="">Select Shop</option>
-                        {scopedCustomers.map((customer) => (
-                          <option key={customer.id} value={customer.id}>
-                            {customer.shop_name} ({customer.customer_code})
-                          </option>
-                        ))}
-                      </select>
+                      <div ref={customerPickerRef} className="relative">
+                        <input
+                          type="text"
+                          value={customerPickerSearch}
+                          onChange={(e) => {
+                            setCustomerPickerSearch(e.target.value);
+                            setCustomerId('');
+                            setShowCustomerPicker(true);
+                            setHighlightedCustomerIndex(-1);
+                          }}
+                          onFocus={() => {
+                            setShowCustomerPicker(true);
+                            setHighlightedCustomerIndex(-1);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              if (!showCustomerPicker) {
+                                setShowCustomerPicker(true);
+                              }
+                              if (customerSuggestions.length > 0) {
+                                setHighlightedCustomerIndex((prev) =>
+                                  prev < customerSuggestions.length - 1 ? prev + 1 : 0
+                                );
+                              }
+                              return;
+                            }
+
+                            if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              if (!showCustomerPicker) {
+                                setShowCustomerPicker(true);
+                              }
+                              if (customerSuggestions.length > 0) {
+                                setHighlightedCustomerIndex((prev) =>
+                                  prev > 0 ? prev - 1 : customerSuggestions.length - 1
+                                );
+                              }
+                              return;
+                            }
+
+                            if (e.key === 'Enter') {
+                              if (showCustomerPicker && customerSuggestions.length > 0) {
+                                e.preventDefault();
+                                const pickedIndex = highlightedCustomerIndex >= 0 ? highlightedCustomerIndex : 0;
+                                const picked = customerSuggestions[pickedIndex];
+                                if (picked) {
+                                  setCustomerId(String(picked.id));
+                                  setCustomerPickerSearch(`${picked.shop_name} (${picked.customer_code})`);
+                                  setShowCustomerPicker(false);
+                                  setHighlightedCustomerIndex(-1);
+                                }
+                              }
+                              return;
+                            }
+
+                            if (e.key === 'Escape') {
+                              setShowCustomerPicker(false);
+                              setHighlightedCustomerIndex(-1);
+                            }
+                          }}
+                          placeholder="Type shop name or customer code"
+                          className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                        />
+
+                        {showCustomerPicker && customerSuggestions.length > 0 && (
+                          <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-xl border border-emerald-100 bg-white shadow-xl">
+                            {customerSuggestions.map((customer, index) => {
+                              const isHighlighted = index === highlightedCustomerIndex;
+                              const isSelected = selectedCustomer?.id === customer.id;
+                              return (
+                                <button
+                                  key={customer.id}
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setCustomerId(String(customer.id));
+                                    setCustomerPickerSearch(`${customer.shop_name} (${customer.customer_code})`);
+                                    setShowCustomerPicker(false);
+                                    setHighlightedCustomerIndex(-1);
+                                  }}
+                                  className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm ${
+                                    isHighlighted
+                                      ? 'bg-emerald-100 text-emerald-900'
+                                      : isSelected
+                                        ? 'bg-emerald-50 text-emerald-800'
+                                        : 'text-slate-800 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <span className="font-medium">{customer.shop_name}</span>
+                                  <span className="text-xs text-slate-500">{customer.customer_code}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {showCustomerPicker && customerSuggestions.length === 0 && customerPickerSearch.trim() && (
+                          <div className="absolute z-20 mt-1 w-full rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-slate-500 shadow-xl">
+                            No matching shop found.
+                          </div>
+                        )}
+                      </div>
+                      {selectedCustomer && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          Selected: {selectedCustomer.shop_name} ({selectedCustomer.customer_code})
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">Invoice Date</label>
@@ -1922,7 +2300,7 @@ export default function DistributionInvoicesPage() {
                         type="date"
                         value={invoiceDate}
                         onChange={(e) => setInvoiceDate(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                        className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100"
                         required
                       />
                     </div>
@@ -1932,26 +2310,26 @@ export default function DistributionInvoicesPage() {
                         type="date"
                         value={dueDate}
                         onChange={(e) => setDueDate(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                        className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100"
                       />
                     </div>
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-4">
+                <section className="space-y-4 rounded-2xl border border-cyan-100 bg-gradient-to-br from-white via-cyan-50/50 to-slate-50/70 p-3 shadow-sm sm:p-4">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div>
-                      <h4 className="text-sm font-semibold text-gray-900">Items</h4>
-                      <p className="text-xs text-gray-500">Search stock, add quantity, then review the lines.</p>
+                      <h4 className="text-sm font-semibold text-slate-900">Items</h4>
+                      <p className="text-xs text-slate-500">Search stock, add quantity, then review the lines.</p>
                     </div>
-                    <div className="hidden md:flex flex-col items-end text-xs text-gray-600">
-                      <span>Subtotal: <span className="font-semibold text-gray-900">{subtotal.toFixed(2)}</span></span>
-                      <span>Bill total (before returns): <span className="font-semibold text-gray-900">{invoiceTotalBeforeReturns.toFixed(2)}</span></span>
+                    <div className="hidden md:flex flex-col items-end rounded-xl border border-cyan-100 bg-white/80 px-3 py-2 text-xs text-slate-600">
+                      <span>Subtotal: <span className="font-semibold text-slate-900">{subtotal.toFixed(2)}</span></span>
+                      <span>Bill total (before returns): <span className="font-semibold text-slate-900">{invoiceTotalBeforeReturns.toFixed(2)}</span></span>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3 sm:gap-4">
-                    <div className="md:col-span-3">
+                  <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-12 md:items-end">
+                    <div className="md:col-span-5">
                       <label className="block text-xs font-medium text-gray-700 mb-1">Item</label>
                       <div className="relative">
                         <input
@@ -1960,6 +2338,7 @@ export default function DistributionInvoicesPage() {
                           onChange={(e) => {
                             setItemSearch(e.target.value);
                             setSelectedItemId('');
+                            setSelectedLoadItemId('');
                             setShowItemDropdown(true);
                             setHighlightedItemIndex(-1);
                           }}
@@ -1981,8 +2360,9 @@ export default function DistributionInvoicesPage() {
                               const targetIndex = highlightedItemIndex >= 0 ? highlightedItemIndex : 0;
                               const picked = filteredItems[targetIndex];
                               if (picked) {
-                                setSelectedItemId(String(picked.id));
-                                setItemSearch(`${picked.code} - ${picked.name}`);
+                                setSelectedItemId(String(picked.inventory_item_id));
+                                setSelectedLoadItemId(String(picked.load_item_id));
+                                setItemSearch(`${picked.item_code} - ${picked.item_name} | ${picked.sell_price.toFixed(2)}`);
                                 setShowItemDropdown(false);
                                 setHighlightedItemIndex(-1);
                               }
@@ -1991,55 +2371,48 @@ export default function DistributionInvoicesPage() {
                               setHighlightedItemIndex(-1);
                             }
                           }}
-                          placeholder="Type item code or name"
-                          className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                          placeholder="Type item code or name (from selected load)"
+                          className="w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-cyan-400 focus:outline-none focus:ring-4 focus:ring-cyan-100"
                         />
                         {showItemDropdown && filteredItems.length > 0 && (
-                          <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-56 overflow-y-auto">
+                          <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-cyan-100 bg-white shadow-xl">
                             {filteredItems.map((item, index) => {
-                              const loadQty = loadQtyByCode.get(item.code);
-                              const matchingLoad = loadItems.find(
-                                (li) =>
-                                  li.product_code === item.code &&
-                                  (!activeLoadId || String(li.load_id) === String(activeLoadId))
-                              );
-                              const priceFromLoad = matchingLoad && matchingLoad.sell_price > 0
-                                ? matchingLoad.sell_price
-                                : item.sell_price;
-
                               return (
                                 <button
-                                  key={item.id}
+                                  key={item.load_item_id}
                                   type="button"
                                   onClick={() => {
-                                    setSelectedItemId(String(item.id));
-                                    setItemSearch(`${item.code} - ${item.name}`);
+                                    setSelectedItemId(String(item.inventory_item_id));
+                                    setSelectedLoadItemId(String(item.load_item_id));
+                                    setItemSearch(`${item.item_code} - ${item.item_name} | ${item.sell_price.toFixed(2)}`);
                                     setShowItemDropdown(false);
                                     setHighlightedItemIndex(-1);
                                   }}
                                   className={`w-full text-left px-3 py-2 border-b last:border-b-0 ${
-                                    highlightedItemIndex === index ? 'bg-green-100' : 'hover:bg-green-50'
+                                    highlightedItemIndex === index ? 'bg-cyan-100' : 'hover:bg-cyan-50'
                                   }`}
                                 >
-                                  <div className="text-sm font-medium text-gray-900">{item.code} - {item.name}</div>
-                                  <div className="text-xs text-gray-500">
-                                    {typeof loadQty === 'number' ? `Load: ${loadQty.toFixed(2)} ${item.unit} | ` : ''}
-                                    Stock: {item.current_stock} {item.unit}
-                                    {` | Price: ${priceFromLoad.toFixed(2)}`}
+                                  <div className="text-sm font-medium text-slate-900">{item.item_code} - {item.item_name}</div>
+                                  <div className="text-xs text-slate-500">
+                                    {`Load: ${item.load_qty.toFixed(2)} ${item.unit} | Stock: ${item.warehouse_stock} ${item.unit} | Price: ${item.sell_price.toFixed(2)}`}
                                   </div>
                                 </button>
                               );
                             })}
                           </div>
                         )}
+                        {showItemDropdown && itemSearch.trim() && filteredItems.length === 0 && (
+                          <div className="absolute z-20 mt-1 w-full rounded-xl border border-cyan-100 bg-white px-3 py-2 text-sm text-slate-500 shadow-xl">
+                            {activeLoadId
+                              ? 'No matching items found in this load.'
+                              : 'Select a load first to search load items.'}
+                          </div>
+                        )}
                       </div>
                       {selectedItem && (
                         (() => {
-                          const loadQty = loadQtyByCode.get(selectedItem.code);
                           const matchingLoad = loadItems.find(
-                            (li) =>
-                              li.product_code === selectedItem.code &&
-                              (!activeLoadId || String(li.load_id) === String(activeLoadId))
+                            (li) => String(li.id) === String(selectedLoadItemId)
                           );
                           const priceFromLoad = matchingLoad && matchingLoad.sell_price > 0
                             ? matchingLoad.sell_price
@@ -2048,8 +2421,8 @@ export default function DistributionInvoicesPage() {
                           return (
                             <p className="mt-1 text-xs text-green-700">
                               Selected: {selectedItem.name}
-                              {typeof loadQty === 'number'
-                                ? ` | Load: ${loadQty.toFixed(2)} ${selectedItem.unit}`
+                              {matchingLoad
+                                ? ` | Load: ${Number(matchingLoad.qty).toFixed(2)} ${selectedItem.unit}`
                                 : ''}
                               {` | Warehouse: ${selectedItem.current_stock} ${selectedItem.unit}`}
                               {` | Price: ${priceFromLoad.toFixed(2)}`}
@@ -2058,39 +2431,41 @@ export default function DistributionInvoicesPage() {
                         })()
                       )}
                     </div>
-                    <div>
+                    <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-gray-700 mb-1">Qty (Paid)</label>
                       <input
                         type="number"
                         step="0.01"
                         value={lineQty}
                         onChange={(e) => setLineQty(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 mb-2"
+                        className="w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-cyan-400 focus:outline-none focus:ring-4 focus:ring-cyan-100"
                       />
+                    </div>
+                    <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-gray-700 mb-1">Free Qty</label>
                       <input
                         type="number"
                         step="0.01"
                         value={lineFreeQty}
                         onChange={(e) => setLineFreeQty(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                        className="w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-cyan-400 focus:outline-none focus:ring-4 focus:ring-cyan-100"
                       />
                     </div>
-                    <div className="flex flex-col justify-end gap-2">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Item Discount (per unit)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={lineItemDiscount}
-                          onChange={(e) => setLineItemDiscount(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
-                        />
-                      </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Item Discount (per unit)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={lineItemDiscount}
+                        onChange={(e) => setLineItemDiscount(e.target.value)}
+                        className="w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-cyan-400 focus:outline-none focus:ring-4 focus:ring-cyan-100"
+                      />
+                    </div>
+                    <div className="md:col-span-1">
                       <button
                         type="button"
                         onClick={addLine}
-                        className="w-full bg-blue-600 text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-blue-700"
+                        className="w-full rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-cyan-200/70 transition hover:from-cyan-700 hover:to-blue-700"
                       >
                         Add Line
                       </button>
@@ -2102,14 +2477,14 @@ export default function DistributionInvoicesPage() {
                     <textarea
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                      className="w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-cyan-400 focus:outline-none focus:ring-4 focus:ring-cyan-100"
                       rows={2}
                     />
                   </div>
 
-                  <div className="hidden md:block overflow-x-auto border border-gray-200 rounded-lg">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
+                  <div className="hidden overflow-x-auto rounded-xl border border-slate-200 md:block">
+                    <table className="min-w-full divide-y divide-slate-200">
+                      <thead className="bg-slate-100/80">
                         <tr>
                           <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Item</th>
                           <th className="px-4 py-2 text-right text-xs text-gray-500 uppercase">Qty (Paid)</th>
@@ -2120,12 +2495,12 @@ export default function DistributionInvoicesPage() {
                           <th className="px-4 py-2 text-right text-xs text-gray-500 uppercase">Action</th>
                         </tr>
                       </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
+                      <tbody className="divide-y divide-slate-100 bg-white">
                         {lines.length === 0 ? (
                           <tr>
                             <td
                               colSpan={7}
-                              className="px-4 py-8 text-center text-gray-500"
+                              className="px-4 py-8 text-center text-slate-500"
                             >
                               No lines added.
                             </td>
@@ -2137,9 +2512,9 @@ export default function DistributionInvoicesPage() {
                               typeof line.paid_quantity === 'number'
                                 ? line.paid_quantity
                                 : line.quantity - freeQty;
-                            const isEditing = editingLineId === line.inventory_item_id;
+                            const isEditing = editingLineId === line.line_id;
                             return (
-                              <tr key={line.inventory_item_id}>
+                              <tr key={line.line_id}>
                                 <td className="px-4 py-2 text-sm text-gray-700">
                                   {line.item_name} ({line.item_code})
                                 </td>
@@ -2151,7 +2526,7 @@ export default function DistributionInvoicesPage() {
                                       value={paidQty}
                                       onChange={(e) =>
                                         updateLineQuantities(
-                                          line.inventory_item_id,
+                                          line.line_id,
                                           Number(e.target.value) || 0,
                                           freeQty
                                         )
@@ -2170,7 +2545,7 @@ export default function DistributionInvoicesPage() {
                                       value={freeQty}
                                       onChange={(e) =>
                                         updateLineQuantities(
-                                          line.inventory_item_id,
+                                          line.line_id,
                                           paidQty,
                                           Number(e.target.value) || 0
                                         )
@@ -2189,7 +2564,7 @@ export default function DistributionInvoicesPage() {
                                       value={line.item_discount || 0}
                                       onChange={(e) =>
                                         updateLineDiscount(
-                                          line.inventory_item_id,
+                                          line.line_id,
                                           Number(e.target.value) || 0
                                         )
                                       }
@@ -2207,7 +2582,7 @@ export default function DistributionInvoicesPage() {
                                       value={line.unit_price}
                                       onChange={(e) =>
                                         updateLineUnitPrice(
-                                          line.inventory_item_id,
+                                          line.line_id,
                                           Number(e.target.value) || 0
                                         )
                                       }
@@ -2233,7 +2608,7 @@ export default function DistributionInvoicesPage() {
                                     ) : (
                                       <button
                                         type="button"
-                                        onClick={() => setEditingLineId(line.inventory_item_id)}
+                                        onClick={() => setEditingLineId(line.line_id)}
                                         className="px-2 py-1 text-xs rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
                                       >
                                         Edit
@@ -2241,7 +2616,7 @@ export default function DistributionInvoicesPage() {
                                     )}
                                     <button
                                       type="button"
-                                      onClick={() => removeLine(line.inventory_item_id)}
+                                      onClick={() => removeLine(line.line_id)}
                                       className="px-2 py-1 text-xs rounded-md border border-red-200 text-red-600 hover:bg-red-50"
                                     >
                                       Remove
@@ -2282,7 +2657,7 @@ export default function DistributionInvoicesPage() {
                     </table>
                   </div>
 
-              <div className="md:hidden border border-gray-200 rounded-lg bg-white divide-y divide-gray-200 mt-3">
+                  <div className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white md:hidden">
                 {lines.length === 0 ? (
                   <div className="px-4 py-4 text-center text-sm text-gray-500">No lines added.</div>
                 ) : (
@@ -2292,10 +2667,10 @@ export default function DistributionInvoicesPage() {
                       typeof line.paid_quantity === 'number'
                         ? line.paid_quantity
                         : line.quantity - freeQty;
-                    const isEditing = editingLineId === line.inventory_item_id;
+                    const isEditing = editingLineId === line.line_id;
                     return (
                       <div
-                        key={line.inventory_item_id}
+                        key={line.line_id}
                         className="px-4 py-3 text-sm text-gray-700 flex justify-between gap-3"
                       >
                         <div>
@@ -2327,7 +2702,7 @@ export default function DistributionInvoicesPage() {
                                   value={paidQty}
                                   onChange={(e) =>
                                     updateLineQuantities(
-                                      line.inventory_item_id,
+                                      line.line_id,
                                       Number(e.target.value) || 0,
                                       freeQty
                                     )
@@ -2343,7 +2718,7 @@ export default function DistributionInvoicesPage() {
                                   value={freeQty}
                                   onChange={(e) =>
                                     updateLineQuantities(
-                                      line.inventory_item_id,
+                                      line.line_id,
                                       paidQty,
                                       Number(e.target.value) || 0
                                     )
@@ -2359,7 +2734,7 @@ export default function DistributionInvoicesPage() {
                                   value={line.item_discount || 0}
                                   onChange={(e) =>
                                     updateLineDiscount(
-                                      line.inventory_item_id,
+                                      line.line_id,
                                       Number(e.target.value) || 0
                                     )
                                   }
@@ -2374,7 +2749,7 @@ export default function DistributionInvoicesPage() {
                                   value={line.unit_price}
                                   onChange={(e) =>
                                     updateLineUnitPrice(
-                                      line.inventory_item_id,
+                                      line.line_id,
                                       Number(e.target.value) || 0
                                     )
                                   }
@@ -2403,7 +2778,7 @@ export default function DistributionInvoicesPage() {
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => setEditingLineId(line.inventory_item_id)}
+                                onClick={() => setEditingLineId(line.line_id)}
                                 className="px-2 py-1 text-[11px] rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
                               >
                                 Edit
@@ -2411,7 +2786,7 @@ export default function DistributionInvoicesPage() {
                             )}
                             <button
                               type="button"
-                              onClick={() => removeLine(line.inventory_item_id)}
+                              onClick={() => removeLine(line.line_id)}
                               className="px-2 py-1 text-[11px] rounded-md border border-red-200 text-red-600 hover:bg-red-50"
                             >
                               Remove
@@ -2432,14 +2807,14 @@ export default function DistributionInvoicesPage() {
                 </div>
               </div>
 
-              <div className="mt-4 border-t border-dashed border-gray-200 pt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <div className="mt-4 grid grid-cols-1 gap-3 border-t border-dashed border-slate-300 pt-3 text-sm sm:grid-cols-3">
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-medium text-gray-700 mb-1">Discount</label>
                   <div className="flex gap-2">
                     <select
                       value={discountType}
                       onChange={(e) => setDiscountType(e.target.value as 'amount' | 'percentage')}
-                      className="w-1/2 rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                      className="w-1/2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
                     >
                       <option value="amount">Amount</option>
                       <option value="percentage">%</option>
@@ -2449,7 +2824,7 @@ export default function DistributionInvoicesPage() {
                       step="0.01"
                       value={discountValue}
                       onChange={(e) => setDiscountValue(e.target.value)}
-                      className="w-1/2 rounded-md border border-gray-300 text-sm text-black px-2 py-2"
+                      className="w-1/2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
                     />
                   </div>
                 </div>
@@ -2467,9 +2842,9 @@ export default function DistributionInvoicesPage() {
 
             </section>
 
-            <section className="rounded-xl border border-gray-200 bg-gray-50 p-3 sm:p-4 mt-2">
+            <section className="mt-2 rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50/70 via-white to-emerald-50/45 p-3 shadow-sm sm:p-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                <div className="rounded-xl border border-amber-100 bg-white/90 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="text-sm font-semibold text-gray-800">Item Returns (Expired / Damaged)</h4>
                     <span className="text-xs text-gray-500">Optional</span>
@@ -2480,13 +2855,13 @@ export default function DistributionInvoicesPage() {
 
                   <div className="space-y-2">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] text-gray-600 mb-1">
-                      <div className="inline-flex rounded-full bg-white border border-gray-200 p-1">
+                      <div className="inline-flex rounded-full border border-amber-200 bg-white p-1">
                         <button
                           type="button"
                           onClick={() => setInlineReturnMode('deduct')}
                           className={`px-2.5 py-1 rounded-full border text-xs font-medium ${
                             inlineReturnMode === 'deduct'
-                              ? 'bg-green-600 text-white border-green-600'
+                              ? 'border-green-600 bg-green-600 text-white'
                               : 'bg-transparent text-gray-700 border-transparent'
                           }`}
                         >
@@ -2497,7 +2872,7 @@ export default function DistributionInvoicesPage() {
                           onClick={() => setInlineReturnMode('exchange')}
                           className={`ml-1 px-2.5 py-1 rounded-full border text-xs font-medium ${
                             inlineReturnMode === 'exchange'
-                              ? 'bg-emerald-50 text-green-700 border-green-200'
+                              ? 'border-green-200 bg-emerald-50 text-green-700'
                               : 'bg-transparent text-gray-700 border-transparent'
                           }`}
                         >
@@ -2532,10 +2907,10 @@ export default function DistributionInvoicesPage() {
                               }
                             }}
                             placeholder="Type item code or name"
-                            className="w-full rounded-md border border-gray-300 text-black text-sm"
+                            className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
                           />
                           {showReturnSuggestions && returnSuggestionItems.length > 0 && (
-                            <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-56 overflow-y-auto">
+                            <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-amber-100 bg-white shadow-xl">
                               {returnSuggestionItems.map((item) => (
                                 <button
                                   key={item.id}
@@ -2558,7 +2933,7 @@ export default function DistributionInvoicesPage() {
                           step="0.01"
                           value={returnQtyInput}
                           onChange={(e) => setReturnQtyInput(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 text-black text-sm"
+                            className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
                           placeholder="0.00"
                         />
                       </div>
@@ -2568,7 +2943,7 @@ export default function DistributionInvoicesPage() {
                       <button
                         type="button"
                         onClick={addReturnLine}
-                        className="px-3 py-1 text-xs bg-orange-600 text-white rounded-md hover:bg-orange-700"
+                        className="rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 px-3 py-1 text-xs font-semibold text-white shadow-md shadow-amber-200/70 transition hover:from-amber-600 hover:to-orange-700"
                       >
                         Add Return
                       </button>
@@ -2576,9 +2951,9 @@ export default function DistributionInvoicesPage() {
 
                     {returnLines.length > 0 && (
                       <div className="mt-2">
-                        <div className="hidden md:block border border-gray-200 rounded-md bg-white overflow-hidden">
-                          <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
+                        <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
+                          <table className="min-w-full divide-y divide-slate-200">
+                            <thead className="bg-slate-100/80">
                               <tr>
                                 <th className="px-3 py-1 text-left text-[11px] font-medium text-gray-500 uppercase">Item</th>
                                 <th className="px-3 py-1 text-right text-[11px] font-medium text-gray-500 uppercase">Qty</th>
@@ -2587,7 +2962,7 @@ export default function DistributionInvoicesPage() {
                                 <th className="px-3 py-1 text-right text-[11px] font-medium text-gray-500 uppercase">Action</th>
                               </tr>
                             </thead>
-                            <tbody className="bg-white divide-y divide-gray-100">
+                            <tbody className="divide-y divide-slate-100 bg-white">
                               {returnLines.map((line) => {
                                 const lineValue = line.quantity * line.unit_price;
                                 const isEditing = editingReturnId === line.inventory_item_id;
@@ -2675,7 +3050,7 @@ export default function DistributionInvoicesPage() {
                           </table>
                         </div>
 
-                        <div className="md:hidden border border-gray-200 rounded-md bg-white divide-y divide-gray-100">
+                        <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white md:hidden">
                           {returnLines.map((line) => {
                             const lineValue = line.quantity * line.unit_price;
                             const isEditing = editingReturnId === line.inventory_item_id;
@@ -2771,7 +3146,7 @@ export default function DistributionInvoicesPage() {
                   </div>
                 </div>
 
-                <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                <div className="rounded-xl border border-emerald-100 bg-white/90 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="text-sm font-semibold text-gray-800">Payment Details</h4>
                     <label className="inline-flex items-center text-xs text-gray-600">
@@ -2783,7 +3158,9 @@ export default function DistributionInvoicesPage() {
                           const checked = e.target.checked;
                           setAddPayment(checked);
                           if (checked) {
-                            setPaymentAmount(invoiceFinalTotal.toFixed(2));
+                            if (paymentMethod !== 'bill_to_bill') {
+                              setPaymentAmount(invoiceFinalTotal.toFixed(2));
+                            }
                             setPaymentDate(invoiceDate);
                           }
                         }}
@@ -2802,12 +3179,21 @@ export default function DistributionInvoicesPage() {
                           <label className="block text-xs font-medium text-gray-700 mb-1">Method</label>
                           <select
                             value={paymentMethod}
-                            onChange={(e) => setPaymentMethod(e.target.value as 'cash' | 'check' | 'bank_transfer')}
-                            className="w-full rounded-md border border-gray-300 text-black text-sm"
+                            onChange={(e) => {
+                              const nextMethod = e.target.value as 'cash' | 'check' | 'bank_transfer' | 'bill_to_bill';
+                              setPaymentMethod(nextMethod);
+                              if (nextMethod === 'bill_to_bill') {
+                                setPaymentAmount('');
+                              } else if (addPayment) {
+                                setPaymentAmount(invoiceFinalTotal.toFixed(2));
+                              }
+                            }}
+                            className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
                           >
                             <option value="cash">Cash</option>
                             <option value="check">Cheque</option>
                             <option value="bank_transfer">Bank Transfer</option>
+                            <option value="bill_to_bill">Bill To Bill</option>
                           </select>
                         </div>
                         <div>
@@ -2816,32 +3202,54 @@ export default function DistributionInvoicesPage() {
                             type="date"
                             value={paymentDate}
                             onChange={(e) => setPaymentDate(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 text-black text-sm"
+                            className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
                             required={addPayment}
                           />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Amount</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={paymentAmount}
-                            onChange={(e) => setPaymentAmount(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 text-black text-sm"
-                            required={addPayment}
-                          />
-                        </div>
+                        {paymentMethod === 'bill_to_bill' ? (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Last Bill Amount</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={lastBillAmount}
+                              onChange={(e) => setLastBillAmount(e.target.value)}
+                              className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
+                            />
+                            <p className="mt-1 text-[11px] text-emerald-700">
+                              Leave empty or 0 to create this invoice as credit. Enter amount to settle previous bill.
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Amount</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={paymentAmount}
+                              onChange={(e) => setPaymentAmount(e.target.value)}
+                              className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
+                              required={addPayment}
+                            />
+                          </div>
+                        )}
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">Reference / Cheque No.</label>
                           <input
                             type="text"
                             value={paymentReference}
                             onChange={(e) => setPaymentReference(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 text-black text-sm"
-                            placeholder={paymentMethod === 'check' ? 'Cheque number' : 'Bank reference no.'}
+                            className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
+                            placeholder={
+                              paymentMethod === 'check'
+                                ? 'Cheque number'
+                                : paymentMethod === 'bill_to_bill'
+                                  ? 'Adjustment reference'
+                                  : 'Bank reference no.'
+                            }
                           />
                         </div>
                       </div>
@@ -2852,7 +3260,7 @@ export default function DistributionInvoicesPage() {
                           type="text"
                           value={paymentBankName}
                           onChange={(e) => setPaymentBankName(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 text-black text-sm"
+                          className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
                           placeholder="Bank / Branch"
                         />
                       </div>
@@ -2862,15 +3270,19 @@ export default function DistributionInvoicesPage() {
               </div>
             </section>
 
-                <div className="sticky bottom-0 left-0 right-0 bg-white/95 backdrop-blur pt-3 mt-1 border-t border-gray-200">
-                  <div className="flex items-center justify-between gap-3 mb-3 text-sm">
+                <div className="sticky bottom-0 left-0 right-0 mt-1 border-t border-slate-200 bg-white/95 pt-3 backdrop-blur">
+                  <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50/85 via-white to-cyan-50/70 px-4 py-3 text-sm shadow-[0_14px_40px_-28px_rgba(16,185,129,0.55)]">
                     <div className="flex flex-col">
-                      <span className="text-xs text-gray-500">Grand Total</span>
-                      <span className="text-lg font-semibold text-gray-900">{invoiceFinalTotal.toFixed(2)}</span>
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Grand Total</span>
+                      <span className="text-xl font-extrabold tracking-tight text-slate-900">{invoiceFinalTotal.toFixed(2)}</span>
                     </div>
-                    <div className="hidden sm:flex flex-col text-xs text-gray-600">
-                      <span>Lines: {lines.length}</span>
-                      <span>Returns value: {totalReturnValue.toFixed(2)}</span>
+                    <div className="hidden items-center gap-2 sm:flex">
+                      <span className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-700">
+                        Lines: {lines.length}
+                      </span>
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                        Returns: {totalReturnValue.toFixed(2)}
+                      </span>
                     </div>
                   </div>
                   <div className="flex flex-col sm:flex-row justify-end gap-2 pb-2">
@@ -2880,14 +3292,14 @@ export default function DistributionInvoicesPage() {
                         setShowModal(false);
                         resetInvoiceForm();
                       }}
-                      className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 w-full sm:w-auto"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 sm:w-auto"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
                       disabled={saving}
-                      className="px-4 py-2 bg-green-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 w-full sm:w-auto"
+                      className="w-full rounded-xl border border-transparent bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 sm:w-auto"
                     >
                       {saving ? 'Saving…' : 'Create Invoice'}
                     </button>
@@ -2911,6 +3323,33 @@ export default function DistributionInvoicesPage() {
                 className="px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700"
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirmInvoice && (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/40 px-3">
+          <div className="w-full max-w-md rounded-2xl border border-rose-100 bg-white p-5 shadow-2xl">
+            <h4 className="text-base font-semibold text-slate-900">Confirm Delete</h4>
+            <p className="mt-2 text-sm text-slate-600">
+              Delete invoice {deleteConfirmInvoice.invoice_number}? This action cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmInvoice(null)}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteInvoice}
+                className="rounded-xl border border-transparent bg-gradient-to-r from-rose-600 to-red-600 px-4 py-2 text-sm font-semibold text-white hover:from-rose-700 hover:to-red-700"
+              >
+                Delete Invoice
               </button>
             </div>
           </div>
@@ -3434,6 +3873,37 @@ export default function DistributionInvoicesPage() {
                     ))}
                     {totalLine && <div>{totalLine}</div>}
                     {modeLine && <div>{modeLine}</div>}
+                  </div>
+                </>
+              );
+            })()}
+
+            {(() => {
+              const notes = (posPrintInvoice as any).notes as string | undefined;
+              if (!notes || !notes.includes('[PAYMENT EVIDENCE]')) return null;
+
+              const rawLines = notes.split('\n');
+              const evidenceStart = rawLines.findIndex((l) => l.includes('[PAYMENT EVIDENCE]'));
+              if (evidenceStart < 0) return null;
+
+              const evidenceLines: string[] = [];
+              for (let i = evidenceStart + 1; i < rawLines.length; i++) {
+                const t = rawLines[i].trim();
+                if (!t) continue;
+                if (t.startsWith('[') && t.endsWith(']')) break;
+                evidenceLines.push(t);
+              }
+
+              if (evidenceLines.length === 0) return null;
+
+              return (
+                <>
+                  <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }}></div>
+                  <div style={{ fontSize: '9px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '1px' }}>Payment Evidence</div>
+                    {evidenceLines.map((line, idx) => (
+                      <div key={idx}>{line}</div>
+                    ))}
                   </div>
                 </>
               );

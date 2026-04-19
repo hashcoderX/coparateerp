@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\InventoryItem;
+use App\Models\Product;
+use App\Models\RawMaterial;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -109,6 +111,8 @@ class InventoryController extends Controller
                 'additional_info' => $request->additional_info,
             ]);
 
+            $this->syncProductionReferences($item);
+
             return response()->json([
                 'success' => true,
                 'data' => $item->load('supplier'),
@@ -179,6 +183,7 @@ class InventoryController extends Controller
 
         try {
             $item = InventoryItem::findOrFail($id);
+            $originalCode = $item->code;
 
             $item->update([
                 'name' => $request->name,
@@ -198,6 +203,8 @@ class InventoryController extends Controller
                 'status' => $request->status ?? $item->status,
                 'additional_info' => $request->additional_info,
             ]);
+
+            $this->syncProductionReferences($item, $originalCode);
 
             return response()->json([
                 'success' => true,
@@ -226,6 +233,11 @@ class InventoryController extends Controller
     {
         try {
             $item = InventoryItem::findOrFail($id);
+
+            RawMaterial::where('inventory_item_id', $item->id)->delete();
+
+            Product::where('code', $item->code)->delete();
+
             $item->delete();
 
             return response()->json([
@@ -245,5 +257,56 @@ class InventoryController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function syncProductionReferences(InventoryItem $item, ?string $originalCode = null): void
+    {
+        if ($item->type === 'raw_material') {
+            RawMaterial::updateOrCreate(
+                ['inventory_item_id' => $item->id],
+                ['status' => $item->status]
+            );
+
+            $productCleanupQuery = Product::where('code', $item->code);
+            if ($originalCode) {
+                $productCleanupQuery->orWhere('code', $originalCode);
+            }
+            $productCleanupQuery->delete();
+
+            return;
+        }
+
+        RawMaterial::where('inventory_item_id', $item->id)->delete();
+
+        $product = null;
+
+        if ($originalCode) {
+            $product = Product::where('code', $originalCode)->first();
+        }
+
+        if (!$product) {
+            $product = Product::where('code', $item->code)->first();
+        }
+
+        if ($product) {
+            $product->update([
+                'name' => $item->name,
+                'code' => $item->code,
+                'unit' => $item->unit ?: 'pcs',
+                'description' => $item->description,
+                'status' => $item->status ?? 'active',
+            ]);
+
+            return;
+        }
+
+        Product::create([
+            'name' => $item->name,
+            'code' => $item->code,
+            'unit' => $item->unit ?: 'pcs',
+            'standard_batch_size' => 1,
+            'description' => $item->description,
+            'status' => $item->status ?? 'active',
+        ]);
     }
 }

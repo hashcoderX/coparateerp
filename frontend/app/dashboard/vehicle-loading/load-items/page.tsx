@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import jsPDF from 'jspdf';
@@ -70,6 +70,8 @@ export default function LoadItemsPage() {
   const [itemSearch, setItemSearch] = useState('');
   const [showItemDropdown, setShowItemDropdown] = useState(false);
   const [highlightedItemIndex, setHighlightedItemIndex] = useState(-1);
+  const itemInputRef = useRef<HTMLInputElement | null>(null);
+  const itemDropdownRef = useRef<HTMLDivElement | null>(null);
   const [formData, setFormData] = useState({
     product_code: '',
     name: '',
@@ -115,6 +117,16 @@ export default function LoadItemsPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Keep highlighted suggestion visible while navigating with keyboard.
+  useEffect(() => {
+    if (!showItemDropdown || highlightedItemIndex < 0 || !itemDropdownRef.current) return;
+
+    const activeOption = itemDropdownRef.current.querySelector<HTMLElement>(`[data-index="${highlightedItemIndex}"]`);
+    if (activeOption) {
+      activeOption.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedItemIndex, showItemDropdown]);
 
   const fetchLoads = async () => {
     try {
@@ -180,17 +192,66 @@ export default function LoadItemsPage() {
   };
 
   const selectInventoryItem = (item: InventoryItem) => {
-    setFormData({
-      ...formData,
+    setFormData((prev) => ({
+      ...prev,
       product_code: item.code,
       name: item.name,
       type: item.type === 'finished_good' ? 'finished_product' : 'raw_material',
       out_price: item.unit_price.toString(),
       sell_price: item.unit_price.toString()
-    });
+    }));
     setItemSearch(`${item.code} - ${item.name}`);
     setShowItemDropdown(false);
     setHighlightedItemIndex(-1);
+    itemInputRef.current?.focus();
+  };
+
+  const handleItemSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const key = e.key;
+    const isArrowDown = key === 'ArrowDown' || key === 'Down';
+    const isArrowUp = key === 'ArrowUp' || key === 'Up';
+    const isEnter = key === 'Enter';
+    const isEscape = key === 'Escape' || key === 'Esc';
+    const hasOptions = filteredInventoryItems.length > 0;
+
+    if (isArrowDown || isArrowUp) {
+      if (!hasOptions) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!showItemDropdown) {
+        setShowItemDropdown(true);
+      }
+
+      setHighlightedItemIndex((prev) => {
+        if (isArrowDown) {
+          if (prev < 0) return 0;
+          return prev < filteredInventoryItems.length - 1 ? prev + 1 : 0;
+        }
+
+        if (prev < 0) return filteredInventoryItems.length - 1;
+        return prev > 0 ? prev - 1 : filteredInventoryItems.length - 1;
+      });
+      return;
+    }
+
+    if (isEnter && showItemDropdown && hasOptions) {
+      e.preventDefault();
+      e.stopPropagation();
+      const targetIndex = highlightedItemIndex >= 0 ? highlightedItemIndex : 0;
+      const picked = filteredInventoryItems[targetIndex];
+      if (picked) {
+        selectInventoryItem(picked);
+      }
+      return;
+    }
+
+    if (isEscape && showItemDropdown) {
+      e.preventDefault();
+      setShowItemDropdown(false);
+      setHighlightedItemIndex(-1);
+    }
   };
 
   const resetForm = () => {
@@ -310,6 +371,41 @@ export default function LoadItemsPage() {
     return loadItems.reduce((total, item) => total + item.qty, 0);
   };
 
+  const formatDisplayDate = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  const getLoadStatusClass = (status: Load['status']) => {
+    switch (status) {
+      case 'pending':
+        return 'border border-amber-200 bg-amber-100 text-amber-700';
+      case 'in_transit':
+        return 'border border-blue-200 bg-blue-100 text-blue-700';
+      case 'delivered':
+        return 'border border-emerald-200 bg-emerald-100 text-emerald-700';
+      case 'cancelled':
+        return 'border border-rose-200 bg-rose-100 text-rose-700';
+      default:
+        return 'border border-slate-200 bg-slate-100 text-slate-700';
+    }
+  };
+
+  const getItemTypeClass = (type: LoadItem['type']) => {
+    return type === 'finished_product'
+      ? 'border border-emerald-200 bg-emerald-100 text-emerald-700'
+      : 'border border-cyan-200 bg-cyan-100 text-cyan-700';
+  };
+
+  const inputClass = 'w-full rounded-xl border border-emerald-200 bg-white/90 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100';
+  const sectionCardClass = 'rounded-2xl border border-white/60 bg-white/90 shadow-[0_18px_65px_-35px_rgba(16,185,129,0.45)] backdrop-blur-lg';
+  const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500';
+
   const filteredInventoryItems = inventoryItems
     .filter((item) => {
       const search = itemSearch.trim().toLowerCase();
@@ -317,6 +413,18 @@ export default function LoadItemsPage() {
       return item.name.toLowerCase().includes(search) || item.code.toLowerCase().includes(search);
     })
     .slice(0, 12);
+
+  useEffect(() => {
+    if (!showItemDropdown) return;
+    if (filteredInventoryItems.length === 0) {
+      setHighlightedItemIndex(-1);
+      return;
+    }
+
+    if (highlightedItemIndex < 0 || highlightedItemIndex >= filteredInventoryItems.length) {
+      setHighlightedItemIndex(0);
+    }
+  }, [showItemDropdown, filteredInventoryItems.length, highlightedItemIndex]);
 
   const generateLoadConfirmationPDF = () => {
     if (!selectedLoad) return;
@@ -395,25 +503,26 @@ export default function LoadItemsPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-green-600"></div>
+      <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.12),_transparent_30%),linear-gradient(180deg,_#f0fdf4_0%,_#eff6ff_100%)]">
+        <div className="h-14 w-14 animate-spin rounded-full border-b-2 border-emerald-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="relative min-h-screen p-6">
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.12),_transparent_26%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.12),_transparent_30%),linear-gradient(180deg,_#f0fdf4_0%,_#eff6ff_55%,_#f8fafc_100%)]" />
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+        <div className="rounded-[28px] border border-white/70 bg-white/85 p-6 mb-6 shadow-[0_26px_90px_-45px_rgba(16,185,129,0.5)] backdrop-blur-xl">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Load Items Management</h1>
-              <p className="text-gray-600 mt-2">Manage items loaded into vehicles</p>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900">Load Items Management</h1>
+              <p className="text-slate-600 mt-2">Manage item-wise loading with quick search, editing, and export tools.</p>
             </div>
             <button
               onClick={() => router.push('/dashboard/vehicle-loading/loads')}
-              className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
             >
               Back to Loads
             </button>
@@ -421,30 +530,25 @@ export default function LoadItemsPage() {
         </div>
 
         {/* Load Selection */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">Select Load</h2>
+        <div className={`${sectionCardClass} p-6 mb-6`}>
+          <h2 className="text-xl font-semibold text-slate-900 mb-4">Select Load</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {loads.map((load) => (
               <div
                 key={load.id}
                 onClick={() => setSelectedLoad(load)}
-                className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                className={`p-4 rounded-2xl cursor-pointer transition-all border ${
                   selectedLoad?.id === load.id
-                    ? 'border-green-500 bg-green-50'
-                    : 'border-gray-200 hover:border-gray-300'
+                    ? 'border-emerald-400 bg-gradient-to-br from-emerald-50 to-cyan-50 shadow-md'
+                    : 'border-slate-200 bg-white hover:border-emerald-300 hover:shadow-sm'
                 }`}
               >
-                <div className="font-semibold text-gray-900">{load.load_number}</div>
-                <div className="text-sm text-gray-600">
+                <div className="font-semibold text-slate-900">{load.load_number}</div>
+                <div className="text-sm text-slate-600">
                   {load.vehicle?.registration_number} - {load.route?.name}
                 </div>
-                <div className="text-sm text-gray-500">{load.load_date}</div>
-                <div className={`text-xs px-2 py-1 rounded-full inline-block mt-2 ${
-                  load.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                  load.status === 'in_transit' ? 'bg-blue-100 text-blue-800' :
-                  load.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                  'bg-red-100 text-red-800'
-                }`}>
+                <div className="text-sm text-slate-500">{formatDisplayDate(load.load_date)}</div>
+                <div className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase mt-2 ${getLoadStatusClass(load.status)}`}>
                   {load.status.replace('_', ' ')}
                 </div>
               </div>
@@ -455,47 +559,48 @@ export default function LoadItemsPage() {
         {selectedLoad && (
           <>
             {/* Load Summary */}
-            <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+            <div className={`${sectionCardClass} p-6 mb-6`}>
+              <h2 className="text-xl font-semibold text-slate-900 mb-4">
                 Load: {selectedLoad.load_number}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-600">Vehicle</div>
-                  <div className="font-semibold text-gray-900">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.12em] text-slate-500">Vehicle</div>
+                  <div className="font-semibold text-slate-900 mt-1">
                     {selectedLoad.vehicle?.registration_number}
                   </div>
                 </div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-600">Route</div>
-                  <div className="font-semibold text-gray-900">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.12em] text-slate-500">Route</div>
+                  <div className="font-semibold text-slate-900 mt-1">
                     {selectedLoad.route?.name}
                   </div>
                 </div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-600">Total Items</div>
-                  <div className="font-semibold text-gray-900">{loadItems.length}</div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.12em] text-slate-500">Total Items</div>
+                  <div className="font-semibold text-slate-900 mt-1">{loadItems.length}</div>
                 </div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-600">Total Value</div>
-                  <div className="font-semibold text-gray-900">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.12em] text-slate-500">Total Value</div>
+                  <div className="font-semibold text-slate-900 mt-1">
                     LKR {getTotalValue().toLocaleString()}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <div className={`${sectionCardClass} relative z-30 overflow-visible p-6 mb-6`}>
+              <h3 className="text-lg font-semibold text-slate-900 mb-4">
                 {editingItem ? 'Edit Load Item' : 'Add New Load Item'}
               </h3>
               <form onSubmit={handleSubmit}>
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
-                  <div className="relative item-search-box lg:col-span-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <div className="relative z-50 item-search-box lg:col-span-3">
+                    <label className={labelClass}>
                       Item Search
                     </label>
                     <input
+                      ref={itemInputRef}
                       type="text"
                       value={itemSearch}
                       onChange={(e) => {
@@ -508,84 +613,66 @@ export default function LoadItemsPage() {
                       }}
                       onFocus={() => {
                         setShowItemDropdown(true);
-                        setHighlightedItemIndex(-1);
+                        setHighlightedItemIndex(filteredInventoryItems.length > 0 ? 0 : -1);
                       }}
-                      onKeyDown={(e) => {
-                        if (!showItemDropdown || filteredInventoryItems.length === 0) return;
-
-                        if (e.key === 'ArrowDown') {
-                          e.preventDefault();
-                          setHighlightedItemIndex((prev) => (prev < filteredInventoryItems.length - 1 ? prev + 1 : 0));
-                        } else if (e.key === 'ArrowUp') {
-                          e.preventDefault();
-                          setHighlightedItemIndex((prev) => (prev > 0 ? prev - 1 : filteredInventoryItems.length - 1));
-                        } else if (e.key === 'Enter') {
-                          e.preventDefault();
-                          const targetIndex = highlightedItemIndex >= 0 ? highlightedItemIndex : 0;
-                          const picked = filteredInventoryItems[targetIndex];
-                          if (picked) {
-                            selectInventoryItem(picked);
-                          }
-                        } else if (e.key === 'Escape') {
-                          setShowItemDropdown(false);
-                          setHighlightedItemIndex(-1);
-                        }
-                      }}
+                      onKeyDownCapture={handleItemSearchKeyDown}
+                      onKeyDown={handleItemSearchKeyDown}
                       placeholder="Type item code or name"
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={inputClass}
                     />
                     {showItemDropdown && filteredInventoryItems.length > 0 && (
-                      <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-56 overflow-y-auto">
+                      <div ref={itemDropdownRef} className="z-[120] mt-2 w-full rounded-xl border border-emerald-100 bg-white shadow-2xl max-h-56 overflow-y-auto lg:absolute lg:left-0 lg:top-full">
                         {filteredInventoryItems.map((item, index) => (
                           <button
                             key={item.id}
                             type="button"
+                            data-index={index}
                             onClick={() => selectInventoryItem(item)}
-                            className={`w-full text-left px-3 py-2 border-b last:border-b-0 ${
-                              highlightedItemIndex === index ? 'bg-green-100' : 'hover:bg-green-50'
+                            className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-b-0 ${
+                              highlightedItemIndex === index ? 'bg-emerald-100' : 'hover:bg-emerald-50'
                             }`}
                           >
-                            <div className="text-sm font-medium text-gray-900">{item.code} - {item.name}</div>
-                            <div className="text-xs text-gray-500">Stock: {item.current_stock} {item.unit}</div>
+                            <div className="text-sm font-medium text-slate-900">{item.code} - {item.name}</div>
+                            <div className="text-xs text-slate-500">Stock: {item.current_stock} {item.unit}</div>
                           </button>
                         ))}
                       </div>
                     )}
                   </div>
                   <div className="lg:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={labelClass}>
                       Product Code *
                     </label>
                     <input
                       type="text"
                       value={formData.product_code}
                       onChange={(e) => setFormData({ ...formData, product_code: e.target.value })}
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={inputClass}
                       placeholder="PROD001"
                       required
                     />
                   </div>
                   <div className="lg:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={labelClass}>
                       Product Name *
                     </label>
                     <input
                       type="text"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={inputClass}
                       placeholder="Product name"
                       required
                     />
                   </div>
                   <div className="lg:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={labelClass}>
                       Type *
                     </label>
                     <select
                       value={formData.type}
                       onChange={(e) => setFormData({ ...formData, type: e.target.value as 'finished_product' | 'raw_material' })}
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={inputClass}
                       required
                     >
                       <option value="finished_product">Finished Product</option>
@@ -593,7 +680,7 @@ export default function LoadItemsPage() {
                     </select>
                   </div>
                   <div className="lg:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={labelClass}>
                       Out Price *
                     </label>
                     <input
@@ -601,13 +688,13 @@ export default function LoadItemsPage() {
                       step="0.01"
                       value={formData.out_price}
                       onChange={(e) => setFormData({ ...formData, out_price: e.target.value })}
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={inputClass}
                       placeholder="100.00"
                       required
                     />
                   </div>
                   <div className="lg:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={labelClass}>
                       Sell Price *
                     </label>
                     <input
@@ -615,13 +702,13 @@ export default function LoadItemsPage() {
                       step="0.01"
                       value={formData.sell_price}
                       onChange={(e) => setFormData({ ...formData, sell_price: e.target.value })}
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={inputClass}
                       placeholder="150.00"
                       required
                     />
                   </div>
                   <div className="lg:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={labelClass}>
                       Quantity *
                     </label>
                     <input
@@ -629,7 +716,7 @@ export default function LoadItemsPage() {
                       step="0.01"
                       value={formData.qty}
                       onChange={(e) => setFormData({ ...formData, qty: e.target.value })}
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={inputClass}
                       placeholder="10.00"
                       required
                     />
@@ -641,7 +728,7 @@ export default function LoadItemsPage() {
                         setEditingItem(null);
                         resetForm();
                       }}
-                      className="w-1/2 bg-gray-200 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors font-medium flex items-center justify-center gap-2"
+                      className="w-1/2 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 flex items-center justify-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -650,7 +737,7 @@ export default function LoadItemsPage() {
                     </button>
                     <button
                       type="submit"
-                      className="w-1/2 bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2"
+                      className="w-1/2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700 flex items-center justify-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         {editingItem ? (
@@ -667,65 +754,61 @@ export default function LoadItemsPage() {
             </div>
 
             {/* Load Items Table */}
-            <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+            <div className={`${sectionCardClass} relative z-10 overflow-hidden`}>
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-100/80">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Product Code
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Name
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Type
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Out Price
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Sell Price
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Quantity
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Total Value
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Actions
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="bg-white divide-y divide-slate-100">
                     {loadItems.map((item) => (
-                      <tr key={item.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <tr key={item.id} className="transition hover:bg-emerald-50/35">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-900">
                           {item.product_code}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
                           {item.name}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            item.type === 'finished_product'
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
+                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase ${getItemTypeClass(item.type)}`}>
                             {item.type.replace('_', ' ')}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
                           LKR {item.out_price.toLocaleString()}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
                           LKR {item.sell_price.toLocaleString()}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
                           {item.qty.toLocaleString()}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-800">
                           LKR {(item.sell_price * item.qty).toLocaleString()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -750,20 +833,20 @@ export default function LoadItemsPage() {
             </div>
 
             {/* Action Buttons */}
-            <div className="bg-white rounded-lg shadow-sm p-6 mt-6">
+            <div className={`${sectionCardClass} p-6 mt-6`}>
               <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold text-gray-800">Load Items</h2>
+                <h2 className="text-xl font-semibold text-slate-900">Load Items</h2>
                 <div className="space-x-3">
                   <button
                     onClick={generateLoadConfirmationPDF}
                     disabled={loadItems.length === 0}
-                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    className="rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200/70 transition hover:from-violet-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Load Confirm (PDF)
                   </button>
                   <button
                     onClick={() => setShowCsvModal(true)}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                    className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-200/70 transition hover:from-blue-700 hover:to-cyan-700"
                   >
                     Upload CSV
                   </button>
@@ -772,7 +855,7 @@ export default function LoadItemsPage() {
                       setEditingItem(null);
                       resetForm();
                     }}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+                    className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700"
                   >
                     New Item
                   </button>
@@ -784,11 +867,23 @@ export default function LoadItemsPage() {
 
         {/* CSV Upload Modal */}
         {showCsvModal && (
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-20 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
-              <div className="mt-3">
-                <h3 className="text-xl font-bold text-gray-900 mb-6">Upload CSV File</h3>
-                <div className="mb-4 p-4 bg-blue-50 rounded-lg">
+          <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/45 px-4 py-8 backdrop-blur-sm">
+            <div className="mx-auto w-full max-w-3xl">
+              <div className="overflow-hidden rounded-[30px] border border-white/70 bg-white/90 shadow-[0_30px_120px_-50px_rgba(16,185,129,0.55)] backdrop-blur-xl">
+                <div className="flex items-start justify-between border-b border-white/70 bg-gradient-to-r from-blue-600 via-cyan-600 to-emerald-600 px-6 py-5 text-white">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-100">Bulk Import</p>
+                    <h3 className="mt-1 text-2xl font-bold">Upload CSV File</h3>
+                  </div>
+                  <button
+                    onClick={() => setShowCsvModal(false)}
+                    className="rounded-full border border-white/40 bg-white/20 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/30"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="px-6 py-6">
+                <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
                   <h4 className="font-semibold text-blue-800 mb-2">CSV Format:</h4>
                   <p className="text-sm text-blue-700 mb-2">
                     The CSV file should have the following columns (without header):
@@ -807,33 +902,34 @@ export default function LoadItemsPage() {
                 </div>
                 <form onSubmit={handleCsvUpload}>
                   <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={labelClass}>
                       CSV File *
                     </label>
                     <input
                       type="file"
                       name="csv_file"
                       accept=".csv"
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={inputClass}
                       required
                     />
                   </div>
-                  <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <div className="flex justify-end gap-3 border-t border-slate-200/80 pt-4">
                     <button
                       type="button"
                       onClick={() => setShowCsvModal(false)}
-                      className="bg-gray-300 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-400 transition-colors font-medium"
+                      className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium"
+                      className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700"
                     >
                       Upload CSV
                     </button>
                   </div>
                 </form>
+                </div>
               </div>
             </div>
           </div>

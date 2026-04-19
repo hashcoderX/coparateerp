@@ -16,6 +16,8 @@ interface InventoryItem {
   minimum_stock: number;
   maximum_stock: number;
   unit_price: number;
+  purchase_price?: number | null;
+  sell_price?: number | null;
   supplier_name: string | null;
   supplier_id: number | null;
   location: string;
@@ -63,9 +65,29 @@ export default function Inventory() {
     expiry_date: '',
     status: 'active' as 'active' | 'inactive'
   });
+  const [skuManuallyEdited, setSkuManuallyEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [selectedItemDetails, setSelectedItemDetails] = useState<InventoryItem | null>(null);
+  const [showItemDetailsModal, setShowItemDetailsModal] = useState(false);
   const router = useRouter();
+
+  const toSafeNumber = (value: unknown): number => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const resolveItemPrice = (item: Partial<InventoryItem> | null | undefined): number => {
+    if (!item) return 0;
+    const unitPrice = toSafeNumber(item.unit_price);
+    const purchasePrice = toSafeNumber(item.purchase_price);
+    const sellPrice = toSafeNumber(item.sell_price);
+
+    if (unitPrice > 0) return unitPrice;
+    if (purchasePrice > 0) return purchasePrice;
+    if (sellPrice > 0) return sellPrice;
+    return unitPrice || purchasePrice || sellPrice || 0;
+  };
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -110,10 +132,12 @@ export default function Inventory() {
         const itemsData = response.data.data.data || [];
         const formattedItems = itemsData.map((item: any) => ({
           ...item,
-          current_stock: Number(item.current_stock) || 0,
-          minimum_stock: Number(item.minimum_stock) || 0,
-          maximum_stock: Number(item.maximum_stock) || 0,
-          unit_price: Number(item.unit_price) || 0,
+          current_stock: toSafeNumber(item.current_stock),
+          minimum_stock: toSafeNumber(item.minimum_stock),
+          maximum_stock: toSafeNumber(item.maximum_stock),
+          purchase_price: toSafeNumber(item.purchase_price),
+          sell_price: toSafeNumber(item.sell_price),
+          unit_price: resolveItemPrice(item),
         }));
         setItems(formattedItems);
       } else {
@@ -211,7 +235,15 @@ export default function Inventory() {
         if (response.data.success) {
           setItems(prev => prev.map(item =>
             item.id === editingItem.id
-              ? { ...response.data.data, current_stock: Number(response.data.data.current_stock), minimum_stock: Number(response.data.data.minimum_stock), maximum_stock: Number(response.data.data.maximum_stock), unit_price: Number(response.data.data.unit_price) }
+              ? {
+                  ...response.data.data,
+                  current_stock: toSafeNumber(response.data.data.current_stock),
+                  minimum_stock: toSafeNumber(response.data.data.minimum_stock),
+                  maximum_stock: toSafeNumber(response.data.data.maximum_stock),
+                  purchase_price: toSafeNumber(response.data.data.purchase_price),
+                  sell_price: toSafeNumber(response.data.data.sell_price),
+                  unit_price: resolveItemPrice(response.data.data),
+                }
               : item
           ));
         } else {
@@ -223,7 +255,18 @@ export default function Inventory() {
         });
 
         if (response.data.success) {
-          setItems(prev => [...prev, { ...response.data.data, current_stock: Number(response.data.data.current_stock), minimum_stock: Number(response.data.data.minimum_stock), maximum_stock: Number(response.data.data.maximum_stock), unit_price: Number(response.data.data.unit_price) }]);
+          setItems(prev => [
+            ...prev,
+            {
+              ...response.data.data,
+              current_stock: toSafeNumber(response.data.data.current_stock),
+              minimum_stock: toSafeNumber(response.data.data.minimum_stock),
+              maximum_stock: toSafeNumber(response.data.data.maximum_stock),
+              purchase_price: toSafeNumber(response.data.data.purchase_price),
+              sell_price: toSafeNumber(response.data.data.sell_price),
+              unit_price: resolveItemPrice(response.data.data),
+            },
+          ]);
         } else {
           throw new Error(response.data.message || 'Failed to create item');
         }
@@ -262,6 +305,11 @@ export default function Inventory() {
     setShowModal(true);
   };
 
+  const openItemDetails = (item: InventoryItem) => {
+    setSelectedItemDetails(item);
+    setShowItemDetailsModal(true);
+  };
+
   const handleDelete = async (id: number) => {
     try {
       const response = await axios.delete(`http://localhost:8000/api/stock/inventory/${id}`, {
@@ -281,6 +329,7 @@ export default function Inventory() {
   };
 
   const resetForm = () => {
+    setSkuManuallyEdited(false);
     setFormData({
       name: '',
       code: '',
@@ -302,9 +351,45 @@ export default function Inventory() {
 
   const openAddModal = () => {
     setEditingItem(null);
+    setSkuManuallyEdited(false);
     resetForm();
     setShowModal(true);
   };
+
+  const generateSkuCode = (name: string, type: 'raw_material' | 'finished_good') => {
+    const prefix = type === 'raw_material' ? 'RM' : 'FG';
+    const cleanedName = String(name || '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').trim();
+    const words = cleanedName.split(/\s+/).filter(Boolean);
+    const core = cleanedName
+      ? words.length > 1
+        ? words.slice(0, 3).map((word) => word.slice(0, 2)).join('')
+        : cleanedName.replace(/\s+/g, '').slice(0, 6)
+      : 'ITEM';
+
+    const normalizedCore = core.replace(/[^A-Z0-9]/g, '') || 'ITEM';
+    const escapedCore = normalizedCore.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`^${prefix}-${escapedCore}-(\\d{3})$`);
+
+    const nextSerial = (items || [])
+      .map((item) => {
+        const match = String(item.code || '').toUpperCase().match(pattern);
+        return match ? Number(match[1]) : 0;
+      })
+      .reduce((max, current) => Math.max(max, current), 0) + 1;
+
+    const paddedSerial = String(nextSerial).padStart(3, '0');
+    return `${prefix}-${normalizedCore}-${paddedSerial}`;
+  };
+
+  useEffect(() => {
+    if (!showModal || editingItem || skuManuallyEdited) return;
+
+    const autoCode = generateSkuCode(formData.name, activeTab);
+    setFormData((prev) => {
+      if (prev.code === autoCode) return prev;
+      return { ...prev, code: autoCode };
+    });
+  }, [formData.name, activeTab, showModal, editingItem, skuManuallyEdited, items]);
 
   const getStockStatus = (item: InventoryItem) => {
     if (item.current_stock <= 0) return { status: 'Out of Stock', color: 'bg-red-100 text-red-800' };
@@ -317,6 +402,9 @@ export default function Inventory() {
   const modalInputClass = 'mt-1.5 block w-full rounded-xl border border-orange-100 bg-gradient-to-b from-white to-orange-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 placeholder:text-gray-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
   const modalSelectClass = 'mt-1.5 block w-full rounded-xl border border-orange-100 bg-gradient-to-b from-white to-orange-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
   const modalTextareaClass = 'mt-1.5 block w-full rounded-xl border border-orange-100 bg-gradient-to-b from-white to-orange-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 placeholder:text-gray-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
+  const totalStockValue = items.reduce((sum, item) => sum + (item.current_stock * resolveItemPrice(item)), 0);
+  const lowStockItems = items.filter(item => item.current_stock <= item.minimum_stock).length;
+  const inStockItems = items.filter(item => item.current_stock > item.minimum_stock).length;
 
   if (!token) {
     return (
@@ -327,22 +415,26 @@ export default function Inventory() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-h-screen space-y-6 bg-[radial-gradient(circle_at_top_left,_rgba(251,146,60,0.16),_transparent_23%),radial-gradient(circle_at_top_right,_rgba(245,158,11,0.14),_transparent_25%),linear-gradient(180deg,_#fffaf5_0%,_#fff7ed_42%,_#fff3e4_100%)] p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="bg-white shadow rounded-lg">
-        <div className="px-4 py-5 sm:p-6">
-          <div className="flex justify-between items-center">
+      <div className="overflow-hidden rounded-[30px] border border-white/70 bg-white/75 shadow-[0_26px_90px_-45px_rgba(194,65,12,0.5)] backdrop-blur-xl">
+        <div className="grid gap-8 px-5 py-6 sm:px-6 lg:grid-cols-[1.3fr_1fr] lg:px-8">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-4 py-1.5 text-sm font-semibold text-orange-700">
+              <span className="h-2 w-2 rounded-full bg-orange-500"></span>
+              Inventory command center
+            </div>
             <div>
-              <h3 className="text-lg leading-6 font-medium text-gray-900">
+              <h3 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
                 Inventory Management
               </h3>
-              <p className="mt-1 max-w-2xl text-sm text-gray-500">
-                Manage raw materials and finished goods inventory.
+              <p className="mt-2 max-w-2xl text-sm text-slate-600 sm:text-base">
+                Manage raw materials and finished goods with richer visibility, cleaner records, and faster item-level decisions.
               </p>
             </div>
             <button
               onClick={openAddModal}
-              className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center"
+              className="inline-flex items-center rounded-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-orange-300/50 transition hover:scale-[1.02] hover:from-orange-600 hover:to-yellow-500"
             >
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -350,19 +442,37 @@ export default function Inventory() {
               Add Item
             </button>
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div className="rounded-3xl border border-orange-200/70 bg-gradient-to-br from-orange-500 to-amber-500 p-5 text-white shadow-lg shadow-orange-300/45">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/80">Total Items</p>
+              <p className="mt-2 text-3xl font-bold">{items.length}</p>
+              <p className="mt-2 text-sm text-white/85">LKR {totalStockValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} inventory value</p>
+            </div>
+            <div className="rounded-3xl border border-red-200 bg-white p-5 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.24em] text-red-500">Low Stock</p>
+              <p className="mt-2 text-3xl font-bold text-slate-900">{lowStockItems}</p>
+              <p className="mt-2 text-sm text-slate-500">Need replenishment attention</p>
+            </div>
+            <div className="rounded-3xl border border-emerald-200 bg-white p-5 shadow-sm sm:col-span-2 lg:col-span-1">
+              <p className="text-xs uppercase tracking-[0.24em] text-emerald-600">Healthy Stock</p>
+              <p className="mt-2 text-3xl font-bold text-slate-900">{inStockItems}</p>
+              <p className="mt-2 text-sm text-slate-500">Above minimum stock threshold</p>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Store Tabs */}
-      <div className="bg-white shadow rounded-lg">
-        <div className="border-b border-gray-200">
+      <div className="overflow-hidden rounded-2xl border border-orange-100 bg-white shadow-[0_18px_65px_-35px_rgba(194,65,12,0.42)]">
+        <div className="border-b border-orange-100 bg-gradient-to-r from-white via-orange-50/70 to-amber-50/70">
           <nav className="-mb-px flex space-x-8 px-6" aria-label="Tabs">
             <button
               onClick={() => setActiveTab('raw_material')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'raw_material'
                   ? 'border-orange-500 text-orange-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-orange-200'
               }`}
             >
               Raw Material Store
@@ -372,7 +482,7 @@ export default function Inventory() {
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'finished_good'
                   ? 'border-orange-500 text-orange-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-orange-200'
               }`}
             >
               Finished Goods Store
@@ -382,8 +492,12 @@ export default function Inventory() {
 
         <div className="p-6">
           {/* Stats Cards */}
+          <div className="mb-2 flex items-center justify-between rounded-2xl border border-orange-100 bg-orange-50/60 px-4 py-2.5">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">Inventory Snapshot</p>
+            <p className="text-xs text-orange-700">Tip: click any row to view full item details</p>
+          </div>
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-            <div className="bg-orange-50 overflow-hidden rounded-lg">
+            <div className="overflow-hidden rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50 to-white">
               <div className="p-5">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
@@ -405,7 +519,7 @@ export default function Inventory() {
               </div>
             </div>
 
-            <div className="bg-red-50 overflow-hidden rounded-lg">
+            <div className="overflow-hidden rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 to-white">
               <div className="p-5">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
@@ -419,7 +533,7 @@ export default function Inventory() {
                         Low Stock Items
                       </dt>
                       <dd className="text-lg font-medium text-gray-900">
-                        {items.filter(item => item.current_stock <= item.minimum_stock).length}
+                        {lowStockItems}
                       </dd>
                     </dl>
                   </div>
@@ -427,7 +541,7 @@ export default function Inventory() {
               </div>
             </div>
 
-            <div className="bg-green-50 overflow-hidden rounded-lg">
+            <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white">
               <div className="p-5">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
@@ -441,7 +555,7 @@ export default function Inventory() {
                         In Stock Items
                       </dt>
                       <dd className="text-lg font-medium text-gray-900">
-                        {items.filter(item => item.current_stock > item.minimum_stock).length}
+                        {inStockItems}
                       </dd>
                     </dl>
                   </div>
@@ -449,7 +563,7 @@ export default function Inventory() {
               </div>
             </div>
 
-            <div className="bg-blue-50 overflow-hidden rounded-lg">
+            <div className="overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white">
               <div className="p-5">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
@@ -463,7 +577,7 @@ export default function Inventory() {
                         Total Value
                       </dt>
                       <dd className="text-lg font-medium text-gray-900">
-                        LKR {items.reduce((sum, item) => sum + (item.current_stock * item.unit_price), 0).toLocaleString()}
+                        LKR {totalStockValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </dd>
                     </dl>
                   </div>
@@ -488,35 +602,46 @@ export default function Inventory() {
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+            <div className="overflow-hidden rounded-2xl border border-orange-100 bg-white shadow-[0_16px_55px_-35px_rgba(194,65,12,0.45)]">
+              <div className="border-b border-orange-100 bg-gradient-to-r from-slate-900 via-orange-900 to-amber-800 px-5 py-3.5">
+                <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-100">
+                  {activeTab === 'raw_material' ? 'Raw Material Inventory' : 'Finished Goods Inventory'}
+                </h4>
+              </div>
+              <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-100/80">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-[0.16em]">
                       Item
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-[0.16em]">
                       Stock Info
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-[0.16em]">
                       Batch
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-[0.16em]">
                       Price
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-[0.16em]">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-[0.16em]">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-slate-200">
                   {items.map((item) => {
                     const stockStatus = getStockStatus(item);
+                    const resolvedPrice = resolveItemPrice(item);
                     return (
-                      <tr key={item.id} className="hover:bg-gray-50">
+                      <tr
+                        key={item.id}
+                        onClick={() => openItemDetails(item)}
+                        className="cursor-pointer transition hover:bg-orange-50/45"
+                      >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="flex-shrink-0 h-10 w-10">
@@ -531,7 +656,7 @@ export default function Inventory() {
                                 {item.name}
                               </div>
                               <div className="text-sm text-gray-500">
-                                {item.code} • {item.category}
+                                {item.code} • {item.category || 'Uncategorized'}
                               </div>
                             </div>
                           </div>
@@ -571,8 +696,8 @@ export default function Inventory() {
                             </div>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          LKR {item.unit_price.toFixed(2)}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-800">
+                          LKR {resolvedPrice.toFixed(2)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${stockStatus.color}`}>
@@ -581,14 +706,20 @@ export default function Inventory() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <button
-                            onClick={() => handleEdit(item)}
-                            className="text-indigo-600 hover:text-indigo-900 mr-4 transition-colors duration-200"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEdit(item);
+                            }}
+                            className="mr-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
                           >
                             Edit
                           </button>
                           <button
-                            onClick={() => setDeleteConfirm(item.id)}
-                            className="text-red-600 hover:text-red-900 transition-colors duration-200"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirm(item.id);
+                            }}
+                            className="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100"
                           >
                             Delete
                           </button>
@@ -599,22 +730,121 @@ export default function Inventory() {
                 </tbody>
               </table>
             </div>
+            </div>
           )}
         </div>
       </div>
 
+      {/* Item Details Modal */}
+      {showItemDetailsModal && selectedItemDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-md">
+          <div className="relative w-full max-w-5xl overflow-hidden rounded-[30px] border border-white/20 bg-white shadow-[0_34px_120px_-40px_rgba(194,65,12,0.58)]">
+            <div className="absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.36),_transparent_45%),linear-gradient(125deg,_rgba(154,52,18,0.95)_0%,_rgba(234,88,12,0.94)_45%,_rgba(249,115,22,0.9)_100%)]"></div>
+            <div className="relative max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start justify-between gap-4 px-6 pb-6 pt-7 text-white sm:px-8">
+                <div>
+                  <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/25 bg-white/15 text-2xl">
+                    🔎
+                  </div>
+                  <h3 className="text-2xl font-semibold tracking-tight sm:text-3xl">Item Details</h3>
+                  <p className="mt-2 text-sm text-white/85 sm:text-base">
+                    {selectedItemDetails.name} • {selectedItemDetails.code}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowItemDetailsModal(false)}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
+                >
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-5 px-6 pb-6 sm:px-8 sm:pb-8">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <section className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-orange-500">Identity</p>
+                    <div className="mt-3 space-y-2 text-sm text-slate-700">
+                      <p><span className="font-semibold text-slate-900">Name:</span> {selectedItemDetails.name}</p>
+                      <p><span className="font-semibold text-slate-900">Code:</span> {selectedItemDetails.code}</p>
+                      <p><span className="font-semibold text-slate-900">Category:</span> {selectedItemDetails.category || 'Uncategorized'}</p>
+                      <p><span className="font-semibold text-slate-900">Type:</span> {selectedItemDetails.type === 'raw_material' ? 'Raw Material' : 'Finished Good'}</p>
+                      <p><span className="font-semibold text-slate-900">Unit:</span> {selectedItemDetails.unit}</p>
+                    </div>
+                  </section>
+
+                  <section className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-orange-500">Stock and Commercial</p>
+                    <div className="mt-3 space-y-2 text-sm text-slate-700">
+                      <p><span className="font-semibold text-slate-900">Current Stock:</span> {selectedItemDetails.current_stock} {selectedItemDetails.unit}</p>
+                      <p><span className="font-semibold text-slate-900">Minimum Stock:</span> {selectedItemDetails.minimum_stock} {selectedItemDetails.unit}</p>
+                      <p><span className="font-semibold text-slate-900">Maximum Stock:</span> {selectedItemDetails.maximum_stock || 0} {selectedItemDetails.unit}</p>
+                      <p><span className="font-semibold text-slate-900">Unit Price:</span> LKR {resolveItemPrice(selectedItemDetails).toFixed(2)}</p>
+                      {selectedItemDetails.purchase_price !== undefined && (
+                        <p><span className="font-semibold text-slate-900">Purchase Price:</span> LKR {toSafeNumber(selectedItemDetails.purchase_price).toFixed(2)}</p>
+                      )}
+                      {selectedItemDetails.sell_price !== undefined && (
+                        <p><span className="font-semibold text-slate-900">Sell Price:</span> LKR {toSafeNumber(selectedItemDetails.sell_price).toFixed(2)}</p>
+                      )}
+                    </div>
+                  </section>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                  <section className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-orange-500">Supplier and Location</p>
+                    <div className="mt-3 space-y-2 text-sm text-slate-700">
+                      <p><span className="font-semibold text-slate-900">Supplier:</span> {selectedItemDetails.supplier_name || selectedItemDetails.supplier?.name || 'Not assigned'}</p>
+                      <p><span className="font-semibold text-slate-900">Location:</span> {selectedItemDetails.location || 'Not set'}</p>
+                      <p><span className="font-semibold text-slate-900">Expiry Date:</span> {selectedItemDetails.expiry_date ? new Date(selectedItemDetails.expiry_date).toLocaleDateString() : 'Not specified'}</p>
+                      <p><span className="font-semibold text-slate-900">Status:</span> {selectedItemDetails.status}</p>
+                    </div>
+                  </section>
+
+                  <section className="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50 to-white p-5 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-orange-600">Description</p>
+                    <p className="mt-3 text-sm leading-6 text-slate-700">
+                      {selectedItemDetails.description || 'No description provided for this item.'}
+                    </p>
+                  </section>
+                </div>
+
+                <div className="sticky bottom-0 -mx-6 border-t border-orange-100 bg-white/95 px-6 py-4 text-right sm:-mx-8 sm:px-8">
+                  <button
+                    onClick={() => setShowItemDetailsModal(false)}
+                    className="rounded-full border border-orange-200 bg-orange-50 px-5 py-2.5 text-sm font-semibold text-orange-700 transition hover:bg-orange-100"
+                  >
+                    Close Details
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-sm overflow-y-auto h-full w-full z-50">
-          <div className="relative top-10 mx-auto p-0 border border-orange-100 w-11/12 md:w-4/5 lg:w-2/3 shadow-2xl rounded-2xl bg-white/95 max-h-[90vh] overflow-y-auto">
-            <div className="mt-3">
-              <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-orange-100 bg-gradient-to-r from-orange-50 via-amber-50 to-white backdrop-blur-sm">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  {editingItem ? 'Edit Item' : `Add Item to ${activeTab === 'raw_material' ? 'Raw Material Store' : 'Finished Goods Store'}`}
-                </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-md">
+          <div className="relative w-full max-w-5xl overflow-hidden rounded-[30px] border border-white/20 bg-white shadow-[0_34px_120px_-40px_rgba(234,88,12,0.55)]">
+            <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.36),_transparent_45%),linear-gradient(125deg,_rgba(194,65,12,0.95)_0%,_rgba(234,88,12,0.94)_45%,_rgba(249,115,22,0.9)_100%)]"></div>
+            <div className="relative max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start justify-between gap-4 px-6 pb-6 pt-7 text-white sm:px-8">
+                <div>
+                  <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/25 bg-white/15 text-2xl">
+                    {editingItem ? '✎' : '📦'}
+                  </div>
+                  <h3 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                    {editingItem ? 'Update Inventory Item' : `Add Item to ${activeTab === 'raw_material' ? 'Raw Material Store' : 'Finished Goods Store'}`}
+                  </h3>
+                  <p className="mt-2 max-w-2xl text-sm text-white/85 sm:text-base">
+                    Capture stock identity, controls, and pricing in one polished workspace built for daily inventory operations.
+                  </p>
+                </div>
                 <button
                   onClick={() => setShowModal(false)}
-                  className="text-gray-400 hover:text-orange-600 transition-colors duration-200"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -622,225 +852,218 @@ export default function Inventory() {
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className={modalLabelClass}>
-                      Item Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className={modalInputClass}
-                      placeholder="Enter item name"
-                    />
-                  </div>
+              <form onSubmit={handleSubmit} className="px-6 pb-6 sm:px-8 sm:pb-8">
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+                  <section className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-orange-500">Item Identity</p>
+                    <h4 className="mt-2 text-lg font-semibold text-gray-900">Core information</h4>
+                    <p className="mt-1 text-sm text-gray-500">Define item identity and classification for better store-level visibility.</p>
 
-                  <div>
-                    <label className={modalLabelClass}>
-                      Item Code/SKU *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.code}
-                      onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                      className={modalInputClass}
-                      placeholder="Enter unique code"
-                    />
-                  </div>
+                    <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div>
+                        <label className={modalLabelClass}>Item Name *</label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.name}
+                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          className={modalInputClass}
+                          placeholder="Enter item name"
+                        />
+                      </div>
 
-                  <div>
-                    <label className={modalLabelClass}>
-                      Category
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      className={modalInputClass}
-                      placeholder="Enter category"
-                    />
-                  </div>
+                      <div>
+                        <label className={modalLabelClass}>Item Code/SKU *</label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.code}
+                          onChange={(e) => {
+                            setSkuManuallyEdited(true);
+                            setFormData({ ...formData, code: e.target.value.toUpperCase() });
+                          }}
+                          className={modalInputClass}
+                          placeholder="Enter unique code"
+                        />
+                      </div>
 
-                  <div>
-                    <label className={modalLabelClass}>
-                      Unit *
-                    </label>
-                    <select
-                      required
-                      value={formData.unit}
-                      onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                      className={modalSelectClass}
-                    >
-                      <option value="">Select unit</option>
-                      <option value="pieces">Pieces</option>
-                      <option value="kg">Kilograms (kg)</option>
-                      <option value="g">Grams (g)</option>
-                      <option value="liters">Liters</option>
-                      <option value="ml">Milliliters (ml)</option>
-                      <option value="bags">Bags</option>
-                      <option value="boxes">Boxes</option>
-                      <option value="meters">Meters</option>
-                      <option value="feet">Feet</option>
-                    </select>
-                  </div>
+                      <div>
+                        <label className={modalLabelClass}>Category</label>
+                        <input
+                          type="text"
+                          value={formData.category}
+                          onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                          className={modalInputClass}
+                          placeholder="Enter category"
+                        />
+                      </div>
 
-                  <div>
-                    <label className={modalLabelClass}>
-                      Current Stock *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={formData.current_stock}
-                      onChange={(e) => setFormData({ ...formData, current_stock: Number(e.target.value) || 0 })}
-                      className={modalInputClass}
-                      placeholder="0.00"
-                    />
-                  </div>
+                      <div>
+                        <label className={modalLabelClass}>Unit *</label>
+                        <select
+                          required
+                          value={formData.unit}
+                          onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                          className={modalSelectClass}
+                        >
+                          <option value="">Select unit</option>
+                          <option value="pieces">Pieces</option>
+                          <option value="kg">Kilograms (kg)</option>
+                          <option value="g">Grams (g)</option>
+                          <option value="liters">Liters</option>
+                          <option value="ml">Milliliters (ml)</option>
+                          <option value="bags">Bags</option>
+                          <option value="boxes">Boxes</option>
+                          <option value="meters">Meters</option>
+                          <option value="feet">Feet</option>
+                        </select>
+                      </div>
 
-                  <div>
-                    <label className={modalLabelClass}>
-                      Minimum Stock *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={formData.minimum_stock}
-                      onChange={(e) => setFormData({ ...formData, minimum_stock: Number(e.target.value) || 0 })}
-                      className={modalInputClass}
-                      placeholder="0.00"
-                    />
-                  </div>
+                      <div className="md:col-span-2">
+                        <label className={modalLabelClass}>Description</label>
+                        <textarea
+                          rows={4}
+                          value={formData.description}
+                          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                          className={modalTextareaClass}
+                          placeholder="Enter item description"
+                        />
+                      </div>
+                    </div>
+                  </section>
 
-                  <div>
-                    <label className={modalLabelClass}>
-                      Maximum Stock
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.maximum_stock}
-                      onChange={(e) => setFormData({ ...formData, maximum_stock: Number(e.target.value) || 0 })}
-                      className={modalInputClass}
-                      placeholder="0.00"
-                    />
-                  </div>
+                  <div className="space-y-6">
+                    <section className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-orange-500">Stock Controls</p>
+                      <h4 className="mt-2 text-lg font-semibold text-gray-900">Quantities and status</h4>
+                      <div className="mt-5 grid grid-cols-1 gap-4">
+                        <div>
+                          <label className={modalLabelClass}>Current Stock *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            required
+                            value={formData.current_stock}
+                            onChange={(e) => setFormData({ ...formData, current_stock: Number(e.target.value) || 0 })}
+                            className={modalInputClass}
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className={modalLabelClass}>Minimum Stock *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            required
+                            value={formData.minimum_stock}
+                            onChange={(e) => setFormData({ ...formData, minimum_stock: Number(e.target.value) || 0 })}
+                            className={modalInputClass}
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className={modalLabelClass}>Maximum Stock</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={formData.maximum_stock}
+                            onChange={(e) => setFormData({ ...formData, maximum_stock: Number(e.target.value) || 0 })}
+                            className={modalInputClass}
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className={modalLabelClass}>Status</label>
+                          <select
+                            value={formData.status}
+                            onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
+                            className={modalSelectClass}
+                          >
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                          </select>
+                        </div>
+                      </div>
+                    </section>
 
-                  <div>
-                    <label className={modalLabelClass}>
-                      Unit Price (LKR) *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={formData.unit_price}
-                      onChange={(e) => setFormData({ ...formData, unit_price: Number(e.target.value) || 0 })}
-                      className={modalInputClass}
-                      placeholder="0.00"
-                    />
-                  </div>
-
-                  <div>
-                    <label className={modalLabelClass}>
-                      Supplier
-                    </label>
-                    <select
-                      value={formData.supplier_id}
-                      onChange={(e) => {
-                        const selectedSupplier = suppliers.find(s => s.id.toString() === e.target.value);
-                        setFormData({
-                          ...formData,
-                          supplier_id: e.target.value,
-                          supplier_name: selectedSupplier ? selectedSupplier.name : ''
-                        });
-                      }}
-                      className={modalSelectClass}
-                    >
-                      <option value="">Select supplier</option>
-                      {suppliers.map((supplier) => (
-                        <option key={supplier.id} value={supplier.id}>
-                          {supplier.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className={modalLabelClass}>
-                      Location
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.location}
-                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                      className={modalInputClass}
-                      placeholder="Warehouse location"
-                    />
-                  </div>
-
-                  <div>
-                    <label className={modalLabelClass}>
-                      Expiry Date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.expiry_date}
-                      onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
-                      className={modalInputClass}
-                    />
-                  </div>
-
-                  <div>
-                    <label className={modalLabelClass}>
-                      Status
-                    </label>
-                    <select
-                      value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
-                      className={modalSelectClass}
-                    >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                    </select>
+                    <section className="rounded-3xl border border-orange-200 bg-gradient-to-br from-orange-50 via-amber-50 to-white p-5 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-orange-500">Commercial Details</p>
+                      <h4 className="mt-2 text-lg font-semibold text-gray-900">Pricing and supply</h4>
+                      <div className="mt-5 grid grid-cols-1 gap-4">
+                        <div>
+                          <label className={modalLabelClass}>Unit Price (LKR) *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            required
+                            value={formData.unit_price}
+                            onChange={(e) => setFormData({ ...formData, unit_price: Number(e.target.value) || 0 })}
+                            className={modalInputClass}
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className={modalLabelClass}>Supplier</label>
+                          <select
+                            value={formData.supplier_id}
+                            onChange={(e) => {
+                              const selectedSupplier = suppliers.find(s => s.id.toString() === e.target.value);
+                              setFormData({
+                                ...formData,
+                                supplier_id: e.target.value,
+                                supplier_name: selectedSupplier ? selectedSupplier.name : ''
+                              });
+                            }}
+                            className={modalSelectClass}
+                          >
+                            <option value="">Select supplier</option>
+                            {suppliers.map((supplier) => (
+                              <option key={supplier.id} value={supplier.id}>
+                                {supplier.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={modalLabelClass}>Location</label>
+                          <input
+                            type="text"
+                            value={formData.location}
+                            onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                            className={modalInputClass}
+                            placeholder="Warehouse location"
+                          />
+                        </div>
+                        <div>
+                          <label className={modalLabelClass}>Expiry Date</label>
+                          <input
+                            type="date"
+                            value={formData.expiry_date}
+                            onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value })}
+                            className={modalInputClass}
+                          />
+                        </div>
+                      </div>
+                    </section>
                   </div>
                 </div>
 
-                <div>
-                  <label className={modalLabelClass}>
-                    Description
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className={modalTextareaClass}
-                    placeholder="Enter item description"
-                  />
-                </div>
-
-                <div className="sticky bottom-0 bg-white/95 border-t border-orange-100 -mx-6 px-6 py-4 flex justify-end space-x-3">
+                <div className="sticky bottom-0 -mx-6 mt-6 flex justify-end space-x-3 border-t border-orange-100 bg-white/95 px-6 py-4 sm:-mx-8 sm:px-8">
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}
-                    className="bg-white py-2.5 px-5 border border-orange-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                    className="rounded-full border border-orange-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={saving}
-                    className="bg-gradient-to-r from-orange-500 to-amber-500 py-2.5 px-5 border border-transparent rounded-xl shadow-sm text-sm font-semibold text-white hover:from-orange-600 hover:to-amber-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="rounded-full bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-orange-600 hover:to-amber-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {saving ? 'Saving...' : (editingItem ? 'Update Item' : 'Add Item')}
                   </button>

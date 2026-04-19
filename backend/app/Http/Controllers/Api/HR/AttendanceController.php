@@ -280,84 +280,260 @@ class AttendanceController extends Controller
             return response()->json(['error' => 'CSV file is empty'], 400);
         }
 
-        $header = array_shift($data); // Remove header row
-        $header = array_map('strtolower', $header); // Normalize to lowercase
+        $rawHeader = array_shift($data); // Remove header row
+        $header = array_map(function ($value) {
+            return $this->normalizeCsvHeader((string) $value);
+        }, $rawHeader);
 
-        // Expected headers: employee_code, date, in_time, out_time, status, notes
-        $expectedHeaders = ['employee_code', 'date', 'in_time', 'out_time', 'status', 'notes'];
-        $missingHeaders = array_diff($expectedHeaders, $header);
-        if (!empty($missingHeaders)) {
-            return response()->json(['error' => 'Missing required headers: ' . implode(', ', $missingHeaders)], 400);
+        $aliases = [
+            'employee_code' => ['employee_code', 'employee_id', 'emp_id', 'empcode', 'employeecode'],
+            'employee_name' => ['employee_name', 'name', 'employee'],
+            'date' => ['date', 'attendance_date'],
+            'in_time' => ['in_time', 'check_in', 'checkin', 'time_in'],
+            'out_time' => ['out_time', 'check_out', 'checkout', 'time_out'],
+            'total_hours' => ['total_hours', 'work_hours', 'hours'],
+            'status' => ['status', 'attendance_status'],
+            'device_id' => ['device_id', 'device', 'machine_id', 'terminal_id'],
+            'notes' => ['notes', 'note', 'remark', 'remarks', 'comment'],
+        ];
+
+        $indexes = [];
+        foreach ($aliases as $canonical => $possible) {
+            $indexes[$canonical] = null;
+            foreach ($possible as $candidate) {
+                $idx = array_search($candidate, $header, true);
+                if ($idx !== false) {
+                    $indexes[$canonical] = $idx;
+                    break;
+                }
+            }
+        }
+
+        if ($indexes['employee_code'] === null || $indexes['date'] === null) {
+            return response()->json([
+                'error' => 'Missing required headers. CSV must contain Employee_ID/employee_code and Date columns.',
+            ], 400);
+        }
+
+        $firstCompany = DB::table('companies')->first();
+        if (!$firstCompany) {
+            return response()->json([
+                'error' => 'No companies found',
+                'message' => 'Please create at least one company before uploading attendance.',
+            ], 400);
         }
 
         $createdRecords = [];
+        $createdCount = 0;
+        $updatedCount = 0;
+        $skippedCount = 0;
         $errors = [];
 
         foreach ($data as $rowIndex => $row) {
-            if (count($row) !== count($header)) {
-                $errors[] = "Row " . ($rowIndex + 2) . ": Column count mismatch";
+            $lineNo = $rowIndex + 2;
+
+            if (count(array_filter($row, function ($value) {
+                return trim((string) $value) !== '';
+            })) === 0) {
+                $skippedCount++;
                 continue;
             }
 
-            $rowData = array_combine($header, $row);
+            if (count($row) < count($header)) {
+                $row = array_pad($row, count($header), '');
+            }
 
-            // Find employee by code
-            $employee = Employee::where('employee_code', $rowData['employee_code'])->first();
+            $employeeCode = trim((string) ($indexes['employee_code'] !== null ? $row[$indexes['employee_code']] : ''));
+            $employeeName = trim((string) ($indexes['employee_name'] !== null ? $row[$indexes['employee_name']] : ''));
+            $dateRaw = trim((string) ($indexes['date'] !== null ? $row[$indexes['date']] : ''));
+            $inRaw = trim((string) ($indexes['in_time'] !== null ? $row[$indexes['in_time']] : ''));
+            $outRaw = trim((string) ($indexes['out_time'] !== null ? $row[$indexes['out_time']] : ''));
+            $hoursRaw = trim((string) ($indexes['total_hours'] !== null ? $row[$indexes['total_hours']] : ''));
+            $statusRaw = trim((string) ($indexes['status'] !== null ? $row[$indexes['status']] : ''));
+            $deviceId = trim((string) ($indexes['device_id'] !== null ? $row[$indexes['device_id']] : ''));
+            $notesRaw = trim((string) ($indexes['notes'] !== null ? $row[$indexes['notes']] : ''));
+
+            if ($employeeCode === '') {
+                $errors[] = "Row {$lineNo}: Employee_ID is required.";
+                continue;
+            }
+
+            if ($dateRaw === '') {
+                $errors[] = "Row {$lineNo}: Date is required.";
+                continue;
+            }
+
+            $employee = Employee::whereRaw('LOWER(employee_code) = ?', [strtolower($employeeCode)])->first();
             if (!$employee) {
-                $errors[] = "Row " . ($rowIndex + 2) . ": Employee code {$rowData['employee_code']} not found";
+                $errors[] = "Row {$lineNo}: Employee code {$employeeCode} not found.";
                 continue;
-            }
-
-            // Validate status
-            $validStatuses = ['present', 'absent', 'late', 'half_day'];
-            if (!in_array($rowData['status'], $validStatuses)) {
-                $errors[] = "Row " . ($rowIndex + 2) . ": Invalid status {$rowData['status']}";
-                continue;
-            }
-
-            // Prepare data
-            $attendanceData = [
-                'tenant_id' => 1, // default tenant
-                'branch_id' => $employee->branch_id,
-                'employee_id' => $employee->id,
-                'date' => $rowData['date'],
-                'status' => $rowData['status'],
-                'notes' => $rowData['notes'] ?? null,
-            ];
-
-            if (!empty($rowData['in_time'])) {
-                $attendanceData['in_time'] = $rowData['in_time'];
-            }
-
-            if (!empty($rowData['out_time'])) {
-                $attendanceData['out_time'] = $rowData['out_time'];
-            }
-
-            if (!empty($attendanceData['in_time']) && !empty($attendanceData['out_time'])) {
-                try {
-                    $inTime = Carbon::createFromFormat('H:i', $attendanceData['in_time']);
-                    $outTime = Carbon::createFromFormat('H:i', $attendanceData['out_time']);
-                    $attendanceData['work_hours'] = $outTime->diffInHours($inTime, true);
-                } catch (\Exception $e) {
-                    $errors[] = "Row " . ($rowIndex + 2) . ": Invalid time format";
-                    continue;
-                }
             }
 
             try {
-                $attendance = Attendance::create($attendanceData);
+                $date = Carbon::parse($dateRaw)->toDateString();
+            } catch (\Exception $e) {
+                $errors[] = "Row {$lineNo}: Invalid date {$dateRaw}.";
+                continue;
+            }
+
+            $inTime = $this->parseCsvTime($inRaw);
+            $outTime = $this->parseCsvTime($outRaw);
+
+            if ($inRaw !== '' && !$inTime) {
+                $errors[] = "Row {$lineNo}: Invalid Check_In time {$inRaw}. Use HH:MM format.";
+                continue;
+            }
+
+            if ($outRaw !== '' && !$outTime) {
+                $errors[] = "Row {$lineNo}: Invalid Check_Out time {$outRaw}. Use HH:MM format.";
+                continue;
+            }
+
+            $status = $this->normalizeAttendanceStatus($statusRaw, $inTime, $outTime);
+            if (!$status) {
+                $errors[] = "Row {$lineNo}: Invalid status {$statusRaw}. Allowed: Present, Absent, Late, Half Day.";
+                continue;
+            }
+
+            $workHours = $this->parseCsvTotalHours($hoursRaw);
+            if ($hoursRaw !== '' && $workHours === null) {
+                $errors[] = "Row {$lineNo}: Invalid Total_Hours {$hoursRaw}. Use HH:MM or decimal hours.";
+                continue;
+            }
+
+            if ($workHours === null && $inTime && $outTime) {
+                $inAt = Carbon::createFromFormat('H:i:s', $inTime);
+                $outAt = Carbon::createFromFormat('H:i:s', $outTime);
+                $workHours = round($outAt->diffInMinutes($inAt, true) / 60, 2);
+            }
+
+            $notesParts = [];
+            if ($notesRaw !== '') {
+                $notesParts[] = $notesRaw;
+            }
+            if ($deviceId !== '') {
+                $notesParts[] = "Device ID: {$deviceId}";
+            }
+            if ($employeeName !== '') {
+                $notesParts[] = "Device Name: {$employeeName}";
+            }
+
+            $branchId = $employee->branch_id;
+            if (!$branchId || !DB::table('companies')->where('id', $branchId)->exists()) {
+                $branchId = $firstCompany->id;
+            }
+
+            $payload = [
+                'tenant_id' => $branchId,
+                'branch_id' => $branchId,
+                'status' => $status,
+                'in_time' => $inTime,
+                'out_time' => $outTime,
+                'work_hours' => $workHours,
+                'notes' => !empty($notesParts) ? implode(' | ', $notesParts) : null,
+            ];
+
+            try {
+                $attendance = Attendance::updateOrCreate(
+                    ['employee_id' => $employee->id, 'date' => $date],
+                    $payload
+                );
+
+                if ($attendance->wasRecentlyCreated) {
+                    $createdCount++;
+                } else {
+                    $updatedCount++;
+                }
+
                 $createdRecords[] = $attendance->load('employee');
             } catch (\Exception $e) {
-                $errors[] = "Row " . ($rowIndex + 2) . ": Failed to create record - " . $e->getMessage();
+                $errors[] = "Row {$lineNo}: Failed to save record - {$e->getMessage()}";
             }
         }
 
         return response()->json([
             'message' => 'CSV upload processed',
-            'created_records' => count($createdRecords),
+            'created_records' => $createdCount,
+            'updated_records' => $updatedCount,
+            'skipped_rows' => $skippedCount,
             'errors' => $errors,
             'data' => $createdRecords,
         ], 200);
+    }
+
+    private function normalizeCsvHeader(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        $normalized = str_replace([' ', '-', '/'], '_', $normalized);
+        $normalized = preg_replace('/_+/', '_', $normalized);
+        return trim((string) $normalized, '_');
+    }
+
+    private function parseCsvTime(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        $formats = ['H:i', 'H:i:s'];
+        foreach ($formats as $format) {
+            try {
+                return Carbon::createFromFormat($format, $value)->format('H:i:s');
+            } catch (\Exception $e) {
+                // Try next format.
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeAttendanceStatus(string $value, ?string $inTime, ?string $outTime): ?string
+    {
+        $normalized = strtolower(trim($value));
+
+        if ($normalized === '' && ($inTime || $outTime)) {
+            return 'present';
+        }
+
+        if ($normalized === '' && !$inTime && !$outTime) {
+            return 'absent';
+        }
+
+        $map = [
+            'present' => 'present',
+            'p' => 'present',
+            'absent' => 'absent',
+            'a' => 'absent',
+            'late' => 'late',
+            'l' => 'late',
+            'half_day' => 'half_day',
+            'half-day' => 'half_day',
+            'half day' => 'half_day',
+            'halfday' => 'half_day',
+            'hd' => 'half_day',
+        ];
+
+        return $map[$normalized] ?? null;
+    }
+
+    private function parseCsvTotalHours(string $value): ?float
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        if (preg_match('/^\d{1,2}:\d{2}$/', $value) === 1) {
+            [$hours, $minutes] = explode(':', $value);
+            return round(((int) $hours) + (((int) $minutes) / 60), 2);
+        }
+
+        if (is_numeric($value)) {
+            return round((float) $value, 2);
+        }
+
+        return null;
     }
 
     /**
@@ -436,13 +612,14 @@ class AttendanceController extends Controller
             }
 
             // Update the attendance record with out_time
-            $attendance->out_time = $validated['out_time'];
+            $normalizedOutTime = Carbon::createFromFormat('H:i', $validated['out_time'])->format('H:i:s');
+            $attendance->out_time = $normalizedOutTime;
 
             // Calculate work hours if in_time exists
             if ($attendance->in_time) {
                 try {
                     $inTime = Carbon::createFromFormat('H:i:s', $attendance->in_time);
-                    $outTime = Carbon::createFromFormat('H:i:s', $validated['out_time']);
+                    $outTime = Carbon::createFromFormat('H:i:s', $normalizedOutTime);
                     $workHours = $outTime->diffInMinutes($inTime, true) / 60; // true = always positive
                     $attendance->work_hours = round($workHours, 2);
                 } catch (\Exception $e) {
@@ -452,7 +629,7 @@ class AttendanceController extends Controller
             }
 
             // Update notes if provided
-            if ($validated['notes']) {
+            if (!empty($validated['notes'])) {
                 $attendance->notes = $validated['notes'];
             }
 

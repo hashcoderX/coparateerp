@@ -16,6 +16,7 @@ interface PurchaseOrder {
     contact_person: string;
   };
   order_date: string;
+  created_at?: string;
   expected_delivery_date: string | null;
   status: 'pending' | 'approved' | 'received' | 'cancelled';
   total_amount: number;
@@ -271,37 +272,95 @@ export default function PurchaseOrdersPage() {
   const modalLabelClass = 'block text-xs font-semibold uppercase tracking-wide text-slate-600';
   const modalInputClass = 'mt-1.5 block w-full rounded-xl border border-blue-100 bg-gradient-to-b from-white to-blue-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 placeholder:text-gray-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100 focus:outline-none';
   const modalSelectClass = 'mt-1.5 block w-full rounded-xl border border-blue-100 bg-gradient-to-b from-white to-blue-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 focus:border-blue-400 focus:ring-4 focus:ring-blue-100 focus:outline-none';
+  const totalOrders = purchaseOrders.length;
+  const pendingOrders = purchaseOrders.filter((order) => order.status === 'pending').length;
+  const approvedOrders = purchaseOrders.filter((order) => order.status === 'approved').length;
+  const totalOrderValue = purchaseOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+  const sortedPurchaseOrders = [...purchaseOrders].sort((a, b) => {
+    const dateA = new Date(a.created_at || a.order_date).getTime();
+    const dateB = new Date(b.created_at || b.order_date).getTime();
+    if (dateA !== dateB) return dateB - dateA;
+    return b.id - a.id;
+  });
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8">
-      <div className="sm:flex sm:items-center">
-        <div className="sm:flex-auto">
-          <h1 className="text-2xl font-semibold text-gray-900">Purchase Orders</h1>
-          <p className="mt-2 text-sm text-gray-700">
-            Manage purchase orders for raw materials, finished products, and office assets.
-          </p>
-        </div>
-        <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
-          <button
-            onClick={() => setShowForm(true)}
-            className="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500"
-          >
-            Add Purchase Order
-          </button>
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_24%),radial-gradient(circle_at_top_right,_rgba(37,99,235,0.15),_transparent_26%),linear-gradient(180deg,_#f6f9ff_0%,_#eef4ff_45%,_#eaf2ff_100%)] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-8 overflow-hidden rounded-[30px] border border-white/65 bg-white/75 shadow-[0_28px_90px_-45px_rgba(37,99,235,0.45)] backdrop-blur-xl">
+        <div className="grid gap-8 px-6 py-7 lg:grid-cols-[1.4fr_0.95fr] lg:px-8">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-1.5 text-sm font-medium text-cyan-700">
+              <span className="h-2 w-2 rounded-full bg-cyan-500"></span>
+              Purchasing command center
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Purchase Orders</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
+                Manage purchase orders for raw materials, finished products, and office assets with a cleaner, faster procurement workspace.
+              </p>
+            </div>
+            <div className="pt-1 flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => setShowForm(true)}
+                className="inline-flex items-center rounded-full bg-gradient-to-r from-blue-600 via-cyan-600 to-sky-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-300/50 transition hover:scale-[1.02] hover:from-blue-700 hover:to-sky-700"
+              >
+                Add Purchase Order
+              </button>
+              <button
+                onClick={() => router.push('/dashboard/purchasing/grn')}
+                className="inline-flex items-center rounded-full border border-cyan-200 bg-white px-5 py-2.5 text-sm font-semibold text-cyan-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-cyan-50"
+              >
+                Go to GRN
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div className="rounded-3xl border border-blue-200/70 bg-gradient-to-br from-blue-600 to-cyan-600 p-5 text-white shadow-lg shadow-blue-300/40">
+              <p className="text-xs uppercase tracking-[0.24em] text-white/75">Total Orders</p>
+              <p className="mt-3 text-3xl font-bold">{totalOrders}</p>
+              <p className="mt-2 text-sm text-white/80">LKR {totalOrderValue.toFixed(2)} total order value</p>
+            </div>
+            <div className="rounded-3xl border border-amber-200 bg-white p-5 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.24em] text-amber-600">Pending</p>
+              <p className="mt-3 text-3xl font-bold text-slate-900">{pendingOrders}</p>
+              <p className="mt-2 text-sm text-slate-500">Waiting for approval or fulfillment</p>
+            </div>
+            <div className="rounded-3xl border border-emerald-200 bg-white p-5 shadow-sm sm:col-span-2 lg:col-span-1">
+              <p className="text-xs uppercase tracking-[0.24em] text-emerald-600">Approved</p>
+              <p className="mt-3 text-3xl font-bold text-slate-900">{approvedOrders}</p>
+              <p className="mt-2 text-sm text-slate-500">Ready for GRN and receiving process</p>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Add Purchase Order Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-sm overflow-y-auto h-full w-full z-50">
-          <div className="relative top-10 mx-auto p-0 border border-blue-100 w-11/12 max-w-5xl shadow-2xl rounded-2xl bg-white/95 max-h-[90vh] overflow-y-auto">
-            <div className="mt-3">
-              <div className="sticky top-0 z-10 px-6 py-4 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-cyan-50 to-white backdrop-blur-sm">
-                <h3 className="text-lg font-semibold text-gray-900">Create Purchase Order</h3>
-                <p className="text-xs text-gray-600 mt-0.5">Select from available inventory suggestions or type brand-new item names.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-md">
+          <div className="relative w-full max-w-[1500px] overflow-hidden rounded-[32px] border border-white/20 bg-white shadow-[0_40px_130px_-45px_rgba(30,64,175,0.6)]">
+            <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.35),_transparent_45%),linear-gradient(125deg,_rgba(15,23,42,0.95)_0%,_rgba(30,64,175,0.94)_45%,_rgba(8,145,178,0.9)_100%)]"></div>
+            <div className="relative max-h-[92vh] overflow-y-auto">
+              <div className="flex items-start justify-between gap-4 px-6 pb-6 pt-7 text-white sm:px-8">
+                <div>
+                  <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/25 bg-white/15 text-2xl">
+                    🧾
+                  </div>
+                  <h3 className="text-2xl font-semibold tracking-tight sm:text-3xl">Create Purchase Order</h3>
+                  <p className="mt-2 max-w-3xl text-sm text-white/85 sm:text-base">Select from available inventory suggestions or type brand-new item names, then finalize quantities and pricing in one extra-large workspace.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
+                >
+                  <span className="text-2xl">&times;</span>
+                </button>
               </div>
-              <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              <form onSubmit={handleSubmit} className="space-y-6 px-6 pb-6 sm:px-8 sm:pb-8">
+                <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">Order Meta</p>
+                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <label className={modalLabelClass}>Supplier</label>
                     <select
@@ -347,11 +406,15 @@ export default function PurchaseOrdersPage() {
                     />
                   </div>
                 </div>
+                </div>
 
                 {/* Order Items */}
-                <div>
+                <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
                   <div className="flex justify-between items-center mb-2">
-                    <h4 className="text-md font-semibold text-gray-900">Order Items</h4>
+                    <div>
+                      <h4 className="text-md font-semibold text-gray-900">Order Items</h4>
+                      <p className="text-xs text-gray-500">Build line items using inventory suggestions or manual entries.</p>
+                    </div>
                     <button
                       type="button"
                       onClick={addItem}
@@ -362,7 +425,7 @@ export default function PurchaseOrdersPage() {
                   </div>
                   <div className="space-y-4">
                     {formData.items.map((item, index) => (
-                      <div key={index} className="p-4 border border-blue-100 rounded-xl bg-gradient-to-br from-blue-50/40 to-white">
+                      <div key={index} className="p-4 border border-blue-100 rounded-2xl bg-gradient-to-br from-blue-50/40 to-white shadow-sm">
                         <div className="flex justify-between items-center mb-3">
                           <h5 className="text-sm font-semibold text-gray-900">Item {index + 1}</h5>
                           <button
@@ -470,7 +533,7 @@ export default function PurchaseOrdersPage() {
                   </div>
                 </div>
 
-                <div className="sticky bottom-0 bg-white/95 border-t border-blue-100 -mx-6 px-6 py-4 flex justify-end space-x-3">
+                <div className="sticky bottom-0 -mx-6 flex justify-end space-x-3 border-t border-blue-100 bg-white/95 px-6 py-4 sm:-mx-8 sm:px-8">
                   <button
                     type="button"
                     onClick={() => setShowForm(false)}
@@ -494,54 +557,58 @@ export default function PurchaseOrdersPage() {
       <div className="mt-8 flow-root">
         <div className="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
           <div className="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
-            <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
-              <table className="min-w-full divide-y divide-gray-300">
-                <thead className="bg-gray-50">
+            <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-[0_20px_70px_-35px_rgba(30,64,175,0.45)]">
+              <div className="border-b border-blue-100 bg-gradient-to-r from-slate-900 via-blue-900 to-cyan-900 px-6 py-4">
+                <h2 className="text-lg font-semibold text-white">Purchase Order Registry</h2>
+                <p className="mt-1 text-sm text-blue-100/85">Track all purchase orders with supplier details, statuses and totals.</p>
+              </div>
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-100/80">
                   <tr>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Order #</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Supplier</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Order Date</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Status</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Total Amount (LKR)</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Items</th>
+                    <th className="px-3 py-3.5 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Order #</th>
+                    <th className="px-3 py-3.5 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Supplier</th>
+                    <th className="px-3 py-3.5 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Order Date</th>
+                    <th className="px-3 py-3.5 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status</th>
+                    <th className="px-3 py-3.5 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total Amount (LKR)</th>
+                    <th className="px-3 py-3.5 text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Items</th>
                     <th className="relative py-3.5 pl-3 pr-4 sm:pr-6">
                       <span className="sr-only">Actions</span>
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200 bg-white">
-                  {purchaseOrders.map((order) => (
-                    <tr key={order.id}>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-gray-900">
-                        {order.order_number}
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {sortedPurchaseOrders.map((order) => (
+                    <tr key={order.id} className="transition hover:bg-blue-50/40">
+                      <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-slate-900">
+                        <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{order.order_number}</span>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-slate-600">
                         {order.supplier.name}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {new Date(order.order_date).toLocaleDateString()}
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-slate-600">
+                        {new Date(order.created_at || order.order_date).toLocaleString()}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(order.status)}`}>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusColor(order.status)}`}>
                           {order.status}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                      <td className="whitespace-nowrap px-3 py-4 text-sm font-semibold text-slate-800">
                         LKR {parseFloat(order.total_amount.toString()).toFixed(2)}
                       </td>
-                      <td className="px-3 py-4 text-sm text-gray-500">
-                        {order.items.length} items
+                      <td className="px-3 py-4 text-sm text-slate-600">
+                        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">{order.items.length} items</span>
                       </td>
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                         <button
                           onClick={() => viewOrder(order)}
-                          className="text-blue-600 hover:text-blue-900 mr-4"
+                          className="mr-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
                         >
                           View
                         </button>
                         <button
                           onClick={() => printOrder(order)}
-                          className="text-green-600 hover:text-green-900"
+                          className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
                         >
                           Print
                         </button>
@@ -557,88 +624,119 @@ export default function PurchaseOrdersPage() {
 
       {/* Order Details Modal */}
       {showOrderDetails && selectedOrder && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
-            <div className="mt-3">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-medium text-gray-900">
-                  Purchase Order Details - {selectedOrder.order_number}
-                </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-md">
+          <div className="relative w-full max-w-6xl overflow-hidden rounded-[30px] border border-white/20 bg-white shadow-[0_36px_120px_-45px_rgba(30,64,175,0.58)]">
+            <div className="absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.35),_transparent_50%),linear-gradient(130deg,_rgba(15,23,42,0.95)_0%,_rgba(37,99,235,0.94)_45%,_rgba(8,145,178,0.9)_100%)]"></div>
+            <div className="relative max-h-[92vh] overflow-y-auto">
+              <div className="flex items-start justify-between gap-4 px-6 pb-6 pt-7 text-white sm:px-8">
+                <div>
+                  <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/25 bg-white/15 text-2xl">
+                    📋
+                  </div>
+                  <h3 className="text-2xl font-semibold tracking-tight sm:text-3xl">Purchase Order Details</h3>
+                  <p className="mt-2 text-sm text-white/85 sm:text-base">
+                    Reference: <span className="font-semibold">{selectedOrder.order_number}</span>
+                  </p>
+                </div>
                 <button
                   onClick={() => setShowOrderDetails(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
                 >
                   <span className="text-2xl">&times;</span>
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div>
-                  <h4 className="font-semibold text-gray-700">Supplier</h4>
-                  <p className="text-gray-600">{selectedOrder.supplier.name}</p>
-                  <p className="text-sm text-gray-500">{selectedOrder.supplier.email}</p>
-                  <p className="text-sm text-gray-500">{selectedOrder.supplier.phone}</p>
+              <div className="space-y-6 px-6 pb-6 sm:px-8 sm:pb-8">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-500">Supplier</p>
+                    <p className="mt-3 text-lg font-semibold text-slate-900">{selectedOrder.supplier.name}</p>
+                    <p className="mt-1 text-sm text-slate-600">{selectedOrder.supplier.email}</p>
+                    <p className="mt-1 text-sm text-slate-600">{selectedOrder.supplier.phone}</p>
+                  </div>
+                  <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-500">Order Information</p>
+                    <p className="mt-3 text-sm text-slate-700">
+                      <span className="font-semibold text-slate-900">Order Date:</span> {new Date(selectedOrder.order_date).toLocaleDateString()}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      <span className="font-semibold text-slate-900">Expected Delivery:</span> {selectedOrder.expected_delivery_date ? new Date(selectedOrder.expected_delivery_date).toLocaleDateString() : 'Not specified'}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-700">
+                      <span className="font-semibold text-slate-900">Status:</span>
+                      <span className={`ml-2 inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusColor(selectedOrder.status)}`}>
+                        {selectedOrder.status}
+                      </span>
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-semibold text-gray-700">Order Information</h4>
-                  <p className="text-gray-600">Order Date: {new Date(selectedOrder.order_date).toLocaleDateString()}</p>
-                  <p className="text-gray-600">Expected Delivery: {selectedOrder.expected_delivery_date ? new Date(selectedOrder.expected_delivery_date).toLocaleDateString() : 'Not specified'}</p>
-                  <p className="text-gray-600">Status: 
-                    <span className={`ml-2 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(selectedOrder.status)}`}>
-                      {selectedOrder.status}
-                    </span>
-                  </p>
-                </div>
-              </div>
 
-              <div className="mb-6">
-                <h4 className="font-semibold text-gray-700 mb-2">Order Items</h4>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {selectedOrder.items.map((item, index) => (
-                        <tr key={index}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {item.inventory_item.name}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {item.quantity}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            LKR {parseFloat(item.unit_price.toString()).toFixed(2)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            LKR {parseFloat(item.total_price.toString()).toFixed(2)}
-                          </td>
+                <div className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm">
+                  <div className="border-b border-blue-100 bg-gradient-to-r from-slate-900 via-blue-900 to-cyan-900 px-6 py-4">
+                    <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-100">Order Items</h4>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200">
+                      <thead className="bg-slate-100/80">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Item</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Quantity</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Unit Price</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Total</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 bg-white">
+                        {selectedOrder.items.map((item, index) => (
+                          <tr key={index} className="transition hover:bg-blue-50/40">
+                            <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-slate-900">
+                              {item.inventory_item.name}
+                            </td>
+                            <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600">
+                              {item.quantity}
+                            </td>
+                            <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-700">
+                              LKR {parseFloat(item.unit_price.toString()).toFixed(2)}
+                            </td>
+                            <td className="whitespace-nowrap px-6 py-4 text-sm font-semibold text-slate-800">
+                              LKR {parseFloat(item.total_price.toString()).toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex justify-between items-center">
-                <div>
-                  {selectedOrder.notes && (
-                    <div>
-                      <h4 className="font-semibold text-gray-700">Notes</h4>
-                      <p className="text-gray-600">{selectedOrder.notes}</p>
-                    </div>
-                  )}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.35fr_0.65fr]">
+                  <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
+                    {selectedOrder.notes && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-500">Notes</p>
+                        <p className="mt-3 text-sm leading-6 text-slate-700">{selectedOrder.notes}</p>
+                      </div>
+                    )}
+                    {!selectedOrder.notes && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-500">Notes</p>
+                        <p className="mt-3 text-sm leading-6 text-slate-500">No additional notes were provided for this order.</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-cyan-50 p-5 text-right shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Total Amount</p>
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      LKR {parseFloat(selectedOrder.total_amount.toString()).toFixed(2)}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <h4 className="font-semibold text-gray-700">Total Amount</h4>
-                  <p className="text-2xl font-bold text-gray-900">
-                    LKR {parseFloat(selectedOrder.total_amount.toString()).toFixed(2)}
-                  </p>
+
+                <div className="sticky bottom-0 -mx-6 border-t border-blue-100 bg-white/95 px-6 py-4 text-right sm:-mx-8 sm:px-8">
+                  <button
+                    onClick={() => setShowOrderDetails(false)}
+                    className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                  >
+                    Close Details
+                  </button>
                 </div>
               </div>
             </div>

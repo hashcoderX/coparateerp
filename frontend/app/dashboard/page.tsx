@@ -188,10 +188,23 @@ export default function Dashboard() {
       path: '/dashboard/distribution',
       accessKeywords: ['distribution', 'customer', 'invoice', 'return', 'payment'],
     },
+    {
+      id: 'accounts',
+      name: 'Accounts',
+      icon: '💼',
+      color: 'from-emerald-500 to-cyan-500',
+      bgColor: 'from-emerald-50 to-cyan-50',
+      path: '/dashboard/accounts',
+      accessKeywords: ['account', 'accounts', 'ledger', 'cash', 'petty', 'finance'],
+    },
   ];
 
   const visibleModules = modules.filter((module) => {
     if (module.adminOnly) return isAdminUser;
+    if (module.id === 'hrm') {
+      // Keep HRM entry visible so every employee can access leave requests.
+      return true;
+    }
     return hasModuleAccess(module.accessKeywords);
   });
 
@@ -325,6 +338,8 @@ export default function Dashboard() {
                       ? 'Manage retail outlets and sales points'
                       : module.name === 'Distribution'
                       ? 'Manage customers, invoices, returns and payments'
+                      : module.name === 'Accounts'
+                      ? 'Handle company books, cash accounts and balances'
                       : 'Access comprehensive management tools'
                     }
                   </p>

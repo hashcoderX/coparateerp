@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import axios from 'axios';
@@ -47,6 +47,8 @@ type SaleItem = {
   id: number;
   item_code: string;
   item_name: string;
+  issue_type?: 'free' | 'sample' | 'retail' | 'wholesale' | 'van_sale';
+  discount_amount?: number;
   quantity: number;
   unit_price: number;
   line_total: number;
@@ -59,14 +61,22 @@ type SaleRow = {
   customer_name?: string;
   total_quantity: number;
   total_amount: number;
+  discount_amount?: number;
+  paid_amount?: number;
+  payment_type?: 'cash' | 'bank' | 'card' | 'online' | null;
+  balance_amount?: number;
   items: SaleItem[];
 };
 
 type CartLine = {
+  row_id: string;
   inventory_item_id: number;
   item_code: string;
   item_name: string;
   unit: string;
+  issue_type: 'free' | 'sample' | 'retail' | 'wholesale' | 'van_sale';
+  discount_amount: number;
+  base_unit_price: number;
   quantity: number;
   unit_price: number;
 };
@@ -85,6 +95,10 @@ type CreatedSale = {
   notes?: string | null;
   total_quantity: number;
   total_amount: number;
+  discount_amount?: number;
+  paid_amount?: number;
+  payment_type?: 'cash' | 'bank' | 'card' | 'online' | null;
+  balance_amount?: number;
   items?: SaleItem[];
   outlet?: { name?: string; code?: string } | null;
   loyalty_points_awarded?: number;
@@ -109,6 +123,36 @@ type CashierSessionStatus = {
   session_date?: string;
 };
 
+const ISSUE_TYPE_OPTIONS: Array<{ value: 'free' | 'sample' | 'retail' | 'wholesale' | 'van_sale'; label: string }> = [
+  { value: 'retail', label: 'Retail' },
+  { value: 'wholesale', label: 'Wholesale' },
+  { value: 'van_sale', label: 'Van Sale' },
+  { value: 'free', label: 'Free' },
+  { value: 'sample', label: 'Sample' },
+];
+
+const formatIssueTypeLabel = (value: string): string => {
+  const map: Record<string, string> = {
+    free: 'Free',
+    sample: 'Sample',
+    retail: 'Retail',
+    wholesale: 'Wholesale',
+    van_sale: 'Van Sale',
+  };
+  return map[value] || value;
+};
+
+const computeEffectiveUnitPrice = (
+  basePrice: number,
+  issueType: 'free' | 'sample' | 'retail' | 'wholesale' | 'van_sale',
+  discountAmount: number
+): number => {
+  if (issueType === 'free' || issueType === 'sample') return 0;
+  const safeBase = Number.isFinite(basePrice) ? Math.max(basePrice, 0) : 0;
+  const safeDiscount = Number.isFinite(discountAmount) ? Math.max(discountAmount, 0) : 0;
+  return Math.max(safeBase - safeDiscount, 0);
+};
+
 export default function OutletPosPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -122,6 +166,9 @@ export default function OutletPosPage() {
   const [customerName, setCustomerName] = useState('');
   const [saleDate, setSaleDate] = useState<string>(() => new Date().toISOString().slice(0, 16));
   const [notes, setNotes] = useState('');
+  const [discountAmount, setDiscountAmount] = useState('0.00');
+  const [paidAmount, setPaidAmount] = useState('0.00');
+  const [paymentType, setPaymentType] = useState<'cash' | 'bank' | 'card' | 'online'>('cash');
   const [message, setMessage] = useState('');
   const [selectedItemId, setSelectedItemId] = useState<number>(0);
   const [itemSearch, setItemSearch] = useState('');
@@ -129,6 +176,8 @@ export default function OutletPosPage() {
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number>(-1);
   const [selectedQty, setSelectedQty] = useState<string>('1');
   const [selectedPrice, setSelectedPrice] = useState<string>('0');
+  const [selectedIssueType, setSelectedIssueType] = useState<'free' | 'sample' | 'retail' | 'wholesale' | 'van_sale'>('retail');
+  const [selectedLineDiscount, setSelectedLineDiscount] = useState<string>('0');
   const [lastCreatedSale, setLastCreatedSale] = useState<CreatedSale | null>(null);
   const [loyaltyCustomers, setLoyaltyCustomers] = useState<LoyaltyCustomer[]>([]);
   const [loyaltySearch, setLoyaltySearch] = useState('');
@@ -136,12 +185,20 @@ export default function OutletPosPage() {
   const [showLoyaltySuggestions, setShowLoyaltySuggestions] = useState(false);
   const [creatingLoyaltyFromCustomerPhone, setCreatingLoyaltyFromCustomerPhone] = useState(false);
   const [cashierSession, setCashierSession] = useState<CashierSessionStatus | null>(null);
+  const [noticeModal, setNoticeModal] = useState<{ isOpen: boolean; title: string; message: string }>({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
   const [companyProfileName, setCompanyProfileName] = useState('Company');
   const [companyProfileLogoUrl, setCompanyProfileLogoUrl] = useState('');
   const [companyProfileAddress, setCompanyProfileAddress] = useState('');
   const [companyProfilePhone, setCompanyProfilePhone] = useState('');
   const [companyProfileEmail, setCompanyProfileEmail] = useState('');
   const [companyProfileWebsite, setCompanyProfileWebsite] = useState('');
+  const customerInputRef = useRef<HTMLInputElement>(null);
+  const itemSearchInputRef = useRef<HTMLInputElement>(null);
+  const itemSuggestionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const qtyInputRef = useRef<HTMLInputElement>(null);
 
   const router = useRouter();
@@ -159,9 +216,21 @@ export default function OutletPosPage() {
 
   const authHeaders = (authToken: string) => ({ Authorization: `Bearer ${authToken}` });
 
+  const getLocalIsoDate = (): string => {
+    const now = new Date();
+    const tzOffsetMs = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - tzOffsetMs).toISOString().slice(0, 10);
+  };
+
+  const todayIsoDate = getLocalIsoDate();
+
   const redirectToLoginWithNext = () => {
     localStorage.removeItem('token');
     router.push(`/?next=${encodeURIComponent(getNextPath())}`);
+  };
+
+  const showNotice = (message: string, title = 'Notice') => {
+    setNoticeModal({ isOpen: true, title, message });
   };
 
   useEffect(() => {
@@ -212,7 +281,7 @@ export default function OutletPosPage() {
   const fetchOutletSales = async (authToken: string): Promise<boolean> => {
     const res = await axios.get(`${API_URL}/api/outlet-pos/sales`, {
       headers: authHeaders(authToken),
-      params: { per_page: 10 },
+      params: { per_page: 50, from_date: todayIsoDate, to_date: todayIsoDate },
       validateStatus: () => true,
     });
 
@@ -306,6 +375,17 @@ export default function OutletPosPage() {
 
     load();
   }, [token, API_URL, router, params]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const timerId = window.setTimeout(() => {
+      customerInputRef.current?.focus();
+      customerInputRef.current?.select();
+    }, 120);
+
+    return () => window.clearTimeout(timerId);
+  }, [loading]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -410,6 +490,45 @@ export default function OutletPosPage() {
     return cart.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_price), 0);
   }, [cart]);
 
+  const selectedEffectiveUnitPrice = useMemo(() => {
+    return computeEffectiveUnitPrice(
+      Number(selectedPrice || 0),
+      selectedIssueType,
+      Number(selectedLineDiscount || 0)
+    );
+  }, [selectedPrice, selectedIssueType, selectedLineDiscount]);
+
+  const effectiveDiscountAmount = useMemo(() => {
+    const raw = Number(discountAmount || 0);
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return Math.min(raw, cartTotal);
+  }, [discountAmount, cartTotal]);
+
+  const lineDiscountTotalAmount = useMemo(() => {
+    return cart.reduce(
+      (sum, line) => sum + Number(line.discount_amount || 0) * Number(line.quantity || 0),
+      0
+    );
+  }, [cart]);
+
+  const totalDiscountAmount = useMemo(() => {
+    return lineDiscountTotalAmount + effectiveDiscountAmount;
+  }, [lineDiscountTotalAmount, effectiveDiscountAmount]);
+
+  const payableTotal = useMemo(() => {
+    return Math.max(cartTotal - effectiveDiscountAmount, 0);
+  }, [cartTotal, effectiveDiscountAmount]);
+
+  const effectivePaidAmount = useMemo(() => {
+    const raw = Number(paidAmount || 0);
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return raw;
+  }, [paidAmount]);
+
+  const balanceAmount = useMemo(() => {
+    return Math.max(payableTotal - effectivePaidAmount, 0);
+  }, [payableTotal, effectivePaidAmount]);
+
   const filteredStocks = useMemo(() => {
     const term = itemSearch.trim().toLowerCase();
     if (!term) return stocks.slice(0, 12);
@@ -443,8 +562,8 @@ export default function OutletPosPage() {
 
   const loyaltyPointsPreview = useMemo(() => {
     if (!selectedLoyaltyCustomerId) return 0;
-    return Number((cartTotal * LOYALTY_POINT_RATE).toFixed(2));
-  }, [cartTotal, selectedLoyaltyCustomerId]);
+    return Number((payableTotal * LOYALTY_POINT_RATE).toFixed(2));
+  }, [payableTotal, selectedLoyaltyCustomerId]);
 
   const canQuickCreateLoyaltyFromCustomerPhone = useMemo(() => {
     return Boolean(
@@ -492,6 +611,14 @@ export default function OutletPosPage() {
     });
   }, [filteredStocks, showItemSuggestions]);
 
+  useEffect(() => {
+    if (!showItemSuggestions) return;
+    if (highlightedSuggestionIndex < 0) return;
+
+    const current = itemSuggestionRefs.current[highlightedSuggestionIndex];
+    current?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedSuggestionIndex, showItemSuggestions]);
+
   const selectStockItem = (line: StockLine) => {
     setSelectedItemId(line.inventory_item_id);
     setItemSearch(`${line.code} - ${line.name}`);
@@ -502,6 +629,14 @@ export default function OutletPosPage() {
   };
 
   const handleItemSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showItemSuggestions && e.key === 'Enter') {
+      if (filteredStocks.length > 0) {
+        e.preventDefault();
+        selectStockItem(filteredStocks[0]);
+      }
+      return;
+    }
+
     if (!showItemSuggestions && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       if (filteredStocks.length > 0) {
         setShowItemSuggestions(true);
@@ -552,61 +687,110 @@ export default function OutletPosPage() {
     }
   };
 
-  const addToCart = () => {
+  const addToCart = (): boolean => {
     const stockLine = stocks.find((s) => s.inventory_item_id === selectedItemId);
     if (!stockLine) {
-      alert('Please select an item.');
-      return;
+      showNotice('Please select an item.');
+      return false;
     }
 
     const qty = Number(selectedQty || 0);
-    const price = Number(selectedPrice || 0);
+    const basePrice = Number(selectedPrice || 0);
+    const lineDiscount = Number(selectedLineDiscount || 0);
+    const effectivePrice = computeEffectiveUnitPrice(basePrice, selectedIssueType, lineDiscount);
 
     if (qty <= 0) {
-      alert('Quantity must be greater than zero.');
-      return;
+      showNotice('Quantity must be greater than zero.');
+      return false;
     }
 
     if (qty > Number(stockLine.available_qty || 0)) {
-      alert('Quantity exceeds available stock.');
-      return;
+      showNotice('Quantity exceeds available stock.');
+      return false;
     }
 
-    const existing = cart.find((c) => c.inventory_item_id === stockLine.inventory_item_id);
-    if (existing) {
-      const newQty = existing.quantity + qty;
-      if (newQty > Number(stockLine.available_qty || 0)) {
-        alert('Combined quantity exceeds available stock.');
-        return;
+    if (lineDiscount < 0) {
+      showNotice('Discount must be zero or greater.');
+      return false;
+    }
+
+    const currentQtyForItem = cart
+      .filter((line) => line.inventory_item_id === stockLine.inventory_item_id)
+      .reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+
+    if (currentQtyForItem + qty > Number(stockLine.available_qty || 0)) {
+      showNotice('Combined quantity exceeds available stock.');
+      return false;
+    }
+
+    const normalizedBasePrice = Number(basePrice.toFixed(2));
+    const normalizedDiscount = selectedIssueType === 'free' || selectedIssueType === 'sample'
+      ? Number(basePrice.toFixed(2))
+      : Number(Math.max(lineDiscount, 0).toFixed(2));
+    const normalizedUnitPrice = Number(effectivePrice.toFixed(2));
+
+    setCart((prev) => {
+      const existingIndex = prev.findIndex((line) => (
+        line.inventory_item_id === stockLine.inventory_item_id
+        && line.issue_type === selectedIssueType
+        && Number(line.base_unit_price) === normalizedBasePrice
+        && Number(line.discount_amount) === normalizedDiscount
+        && Number(line.unit_price) === normalizedUnitPrice
+      ));
+
+      if (existingIndex >= 0) {
+        return prev.map((line, index) => (
+          index === existingIndex
+            ? { ...line, quantity: Number((Number(line.quantity || 0) + qty).toFixed(2)) }
+            : line
+        ));
       }
 
-      setCart((prev) =>
-        prev.map((line) =>
-          line.inventory_item_id === stockLine.inventory_item_id
-            ? { ...line, quantity: newQty, unit_price: price > 0 ? price : line.unit_price }
-            : line
-        )
-      );
-    } else {
-      setCart((prev) => [
+      return [
         ...prev,
         {
+          row_id: `${stockLine.inventory_item_id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           inventory_item_id: stockLine.inventory_item_id,
           item_code: stockLine.code,
           item_name: stockLine.name,
           unit: stockLine.unit,
+          issue_type: selectedIssueType,
+          discount_amount: normalizedDiscount,
+          base_unit_price: normalizedBasePrice,
           quantity: qty,
-          unit_price: price,
+          unit_price: normalizedUnitPrice,
         },
-      ]);
-    }
+      ];
+    });
 
     setSelectedQty('1');
+    setSelectedLineDiscount('0');
     setSelectedPrice('0');
+    setItemSearch('');
+    setSelectedItemId(0);
+    setShowItemSuggestions(false);
+    setHighlightedSuggestionIndex(-1);
+    return true;
   };
 
-  const removeFromCart = (inventoryItemId: number) => {
-    setCart((prev) => prev.filter((line) => line.inventory_item_id !== inventoryItemId));
+  const handleCustomerInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    itemSearchInputRef.current?.focus();
+    setShowItemSuggestions(true);
+  };
+
+  const handleAddToCartKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' && e.code !== 'NumpadEnter') return;
+    e.preventDefault();
+    const added = addToCart();
+    if (added) {
+      setTimeout(() => itemSearchInputRef.current?.focus(), 0);
+    }
+  };
+
+  const removeFromCart = (rowId: string) => {
+    setCart((prev) => prev.filter((line) => line.row_id !== rowId));
   };
 
   const selectLoyaltyCustomer = (customer: LoyaltyCustomer) => {
@@ -629,7 +813,7 @@ export default function OutletPosPage() {
     const rawInput = customerName.trim();
     const phone = normalizePhone(rawInput);
     if (phone.length < 7) {
-      alert('Enter a valid phone number in Customer Name field.');
+      showNotice('Enter a valid phone number in Customer Name field.');
       return;
     }
 
@@ -658,7 +842,7 @@ export default function OutletPosPage() {
         const apiMessage = res.data?.message || 'Failed to create loyalty customer.';
         const validationErrors = (res.data?.errors || {}) as Record<string, string[]>;
         const firstError = Object.values(validationErrors)?.[0]?.[0];
-        alert(firstError || apiMessage);
+        showNotice(firstError || apiMessage, 'Validation');
         return;
       }
 
@@ -671,7 +855,7 @@ export default function OutletPosPage() {
       }
     } catch (error) {
       console.error('Failed to create loyalty customer from customer field phone:', error);
-      alert('Failed to create loyalty customer.');
+      showNotice('Failed to create loyalty customer.');
     } finally {
       setCreatingLoyaltyFromCustomerPhone(false);
     }
@@ -688,7 +872,7 @@ export default function OutletPosPage() {
   const printCustomerBill = (sale: CreatedSale) => {
     const printWindow = window.open('', '_blank', 'width=420,height=760');
     if (!printWindow) {
-      alert('Unable to open print window. Please allow popups.');
+      showNotice('Unable to open print window. Please allow popups.');
       return;
     }
 
@@ -702,6 +886,8 @@ export default function OutletPosPage() {
           <tr>
             <td>${escapeHtml(`${line.item_code || '-'} - ${line.item_name || '-'}`)}</td>
             <td style="text-align:right;">${qty}</td>
+            <td style="text-align:right;">${escapeHtml(formatIssueTypeLabel(line.issue_type || 'retail'))}</td>
+            <td style="text-align:right;">${Number(line.discount_amount || 0).toFixed(2)}</td>
             <td style="text-align:right;">${price}</td>
             <td style="text-align:right;">${total}</td>
           </tr>
@@ -767,6 +953,8 @@ export default function OutletPosPage() {
                 <tr>
                   <th>Item</th>
                   <th style="text-align:right;">Qty</th>
+                  <th style="text-align:right;">Issue</th>
+                  <th style="text-align:right;">Discount</th>
                   <th style="text-align:right;">Price</th>
                   <th style="text-align:right;">Amount</th>
                 </tr>
@@ -780,7 +968,11 @@ export default function OutletPosPage() {
 
             <div class="totals">
               <p><span>Total Qty</span><span>${Number(sale.total_quantity || 0).toFixed(2)}</span></p>
+              <p><span>Subtotal</span><span>${(Number(sale.total_amount || 0) + Number(sale.discount_amount || 0)).toFixed(2)}</span></p>
+              <p><span>Discount</span><span>${Number(sale.discount_amount || 0).toFixed(2)}</span></p>
               <p class="strong"><span>Grand Total</span><span>${Number(sale.total_amount || 0).toFixed(2)}</span></p>
+              <p><span>Paid (${escapeHtml(String(sale.payment_type || 'cash').toUpperCase())})</span><span>${Number(sale.paid_amount || 0).toFixed(2)}</span></p>
+              <p><span>Balance</span><span>${Number(sale.balance_amount || 0).toFixed(2)}</span></p>
             </div>
 
             <p class="note"><strong>Notes:</strong> ${escapeHtml((sale.notes || '').trim() || '-')}</p>
@@ -797,13 +989,28 @@ export default function OutletPosPage() {
 
   const submitSale = async () => {
     if (!cashierSession?.is_open) {
-      alert('Cashier is not open. Please open cash drawer first.');
+      showNotice('Cashier is not open. Please open cash drawer first.');
       router.push(`/outlet-pos/cash-drawer${params.get('outlet_code') ? `?outlet_code=${encodeURIComponent(params.get('outlet_code') || '')}` : ''}`);
       return;
     }
 
     if (cart.length === 0) {
-      alert('Cart is empty.');
+      showNotice('Cart is empty.');
+      return;
+    }
+
+    if (!Number.isFinite(Number(discountAmount || 0)) || Number(discountAmount || 0) < 0) {
+      showNotice('Discount must be zero or greater.');
+      return;
+    }
+
+    if (!Number.isFinite(Number(paidAmount || 0)) || Number(paidAmount || 0) < 0) {
+      showNotice('Paid amount must be zero or greater.');
+      return;
+    }
+
+    if (balanceAmount > 0 && !selectedLoyaltyCustomerId) {
+      showNotice('Credit sale is allowed only for loyalty customers. Please select a loyalty customer for this credit balance.', 'Credit Validation');
       return;
     }
 
@@ -817,11 +1024,16 @@ export default function OutletPosPage() {
           sale_date: saleDate || null,
           customer_name: customerName || null,
           loyalty_customer_id: selectedLoyaltyCustomerId || null,
+          discount_amount: effectiveDiscountAmount,
+          paid_amount: effectivePaidAmount,
+          payment_type: paymentType,
           notes: notes || null,
           items: cart.map((line) => ({
             inventory_item_id: line.inventory_item_id,
             quantity: line.quantity,
-            unit_price: line.unit_price,
+            unit_price: line.base_unit_price,
+            issue_type: line.issue_type,
+            discount_amount: line.discount_amount,
           })),
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -833,6 +1045,9 @@ export default function OutletPosPage() {
       setCustomerName('');
       setSaleDate(new Date().toISOString().slice(0, 16));
       setNotes('');
+      setDiscountAmount('0.00');
+      setPaidAmount('0.00');
+      setPaymentType('cash');
       setSelectedLoyaltyCustomerId(0);
       setLoyaltySearch('');
       const awarded = Number(createdSale?.loyalty_points_awarded || 0);
@@ -844,12 +1059,16 @@ export default function OutletPosPage() {
         setTimeout(() => printCustomerBill(createdSale), 120);
       }
       await refreshOutletData(token);
+      setTimeout(() => {
+        customerInputRef.current?.focus();
+        customerInputRef.current?.select();
+      }, 120);
     } catch (error: any) {
       console.error('Error recording sale:', error);
       const apiMessage = error?.response?.data?.message || 'Failed to record sale';
       const validationErrors = (error?.response?.data?.errors || {}) as Record<string, string[]>;
       const firstError = Object.values(validationErrors)?.[0]?.[0];
-      alert(firstError || apiMessage);
+      showNotice(firstError || apiMessage, 'Validation');
     } finally {
       setSaving(false);
     }
@@ -865,7 +1084,7 @@ export default function OutletPosPage() {
 
   const handleLogout = () => {
     if (cashierSession?.is_open) {
-      alert('Cashier is still open. Please close cash drawer before logout.');
+      showNotice('Cashier is still open. Please close cash drawer before logout.');
       router.push(`/outlet-pos/cash-drawer${params.get('outlet_code') ? `?outlet_code=${encodeURIComponent(params.get('outlet_code') || '')}` : ''}`);
       return;
     }
@@ -955,19 +1174,19 @@ export default function OutletPosPage() {
 
         <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="rounded-xl border border-white/60 bg-white/85 backdrop-blur-lg p-4 shadow-sm">
-            <div className="text-xs text-gray-500">Items In Store</div>
+            <div className="text-xs text-gray-500">Outlet Items</div>
             <div className="text-2xl font-bold text-gray-900">{stockTotals.totalItems}</div>
           </div>
           <div className="rounded-xl border border-white/60 bg-white/85 backdrop-blur-lg p-4 shadow-sm">
-            <div className="text-xs text-gray-500">Available Qty</div>
+            <div className="text-xs text-gray-500">Outlet Available Qty</div>
             <div className="text-2xl font-bold text-gray-900">{stockTotals.totalAvailableQty.toFixed(2)}</div>
           </div>
           <div className="rounded-xl border border-white/60 bg-white/85 backdrop-blur-lg p-4 shadow-sm">
-            <div className="text-xs text-gray-500">Recent Sales</div>
+            <div className="text-xs text-gray-500">Today Sales ({todayIsoDate})</div>
             <div className="text-2xl font-bold text-gray-900">{salesTotals.totalSales}</div>
           </div>
           <div className="rounded-xl border border-white/60 bg-white/85 backdrop-blur-lg p-4 shadow-sm">
-            <div className="text-xs text-gray-500">Recent Sales Amount</div>
+            <div className="text-xs text-gray-500">Today Sales Amount ({todayIsoDate})</div>
             <div className="text-2xl font-bold text-gray-900">{salesTotals.totalAmount.toFixed(2)}</div>
           </div>
         </section>
@@ -1001,9 +1220,11 @@ export default function OutletPosPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name or Phone</label>
                 <input
+                  ref={customerInputRef}
                   type="text"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
+                  onKeyDown={handleCustomerInputKeyDown}
                   className={formInputClass}
                   placeholder="Leave empty for walk-in, or type phone for loyalty"
                 />
@@ -1096,11 +1317,12 @@ export default function OutletPosPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-3">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Item</label>
                 <div className="relative">
                   <input
+                    ref={itemSearchInputRef}
                     type="text"
                     value={itemSearch}
                     onChange={(e) => {
@@ -1117,14 +1339,18 @@ export default function OutletPosPage() {
                     placeholder="Type code or item name"
                     className={formInputClassCompact}
                   />
+                  <p className="mt-1 text-xs text-gray-500">Use Arrow Up/Down to choose item, Enter to select.</p>
 
                   {showItemSuggestions && (
                     <div className="absolute z-20 mt-2 w-full max-h-64 overflow-auto rounded-xl border border-rose-100 bg-white shadow-xl">
                       {filteredStocks.length === 0 ? (
                         <div className="px-3 py-2 text-sm text-gray-500">No matching items.</div>
                       ) : (
-                        filteredStocks.map((line) => (
+                        filteredStocks.map((line, index) => (
                           <button
+                            ref={(el) => {
+                              itemSuggestionRefs.current[index] = el;
+                            }}
                             key={line.inventory_item_id}
                             type="button"
                             onClick={() => selectStockItem(line)}
@@ -1136,7 +1362,7 @@ export default function OutletPosPage() {
                           >
                             <div className="text-sm text-gray-900 font-medium">{line.code} - {line.name}</div>
                             <div className="text-xs text-gray-600">
-                              Avail: {Number(line.available_qty).toFixed(2)} | Sell: {Number(line.sell_price || 0).toFixed(2)}
+                              Outlet Avail: {Number(line.available_qty).toFixed(2)} | Sell: {Number(line.sell_price || 0).toFixed(2)}
                             </div>
                           </button>
                         ))
@@ -1144,6 +1370,18 @@ export default function OutletPosPage() {
                     </div>
                   )}
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Issue Type</label>
+                <select
+                  value={selectedIssueType}
+                  onChange={(e) => setSelectedIssueType(e.target.value as 'free' | 'sample' | 'retail' | 'wholesale' | 'van_sale')}
+                  className={formInputClassCompact}
+                >
+                  {ISSUE_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Qty</label>
@@ -1154,6 +1392,19 @@ export default function OutletPosPage() {
                   step="0.01"
                   value={selectedQty}
                   onChange={(e) => setSelectedQty(e.target.value)}
+                  onKeyDown={handleAddToCartKeyDown}
+                  className={formInputClassCompact}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Discount</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={selectedLineDiscount}
+                  onChange={(e) => setSelectedLineDiscount(e.target.value)}
+                  onKeyDown={handleAddToCartKeyDown}
                   className={formInputClassCompact}
                 />
               </div>
@@ -1165,8 +1416,12 @@ export default function OutletPosPage() {
                   step="0.01"
                   value={selectedPrice}
                   onChange={(e) => setSelectedPrice(e.target.value)}
+                  onKeyDown={handleAddToCartKeyDown}
                   className={formInputClassCompact}
                 />
+                <p className="mt-1 text-xs text-gray-500">
+                  Effective Unit Price: {selectedEffectiveUnitPrice.toFixed(2)}
+                </p>
               </div>
             </div>
 
@@ -1193,48 +1448,116 @@ export default function OutletPosPage() {
               </Link>
             </div>
 
-            <div className="overflow-x-auto border border-gray-200 rounded-md">
-              <table className="min-w-full divide-y divide-gray-200">
+            <div className="overflow-x-auto border border-rose-100 rounded-xl shadow-sm">
+              <table className="min-w-full divide-y divide-rose-100">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Row</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Issue</th>
                     <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Discount</th>
                     <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
                     <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Line Total</th>
                     <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
+                <tbody className="bg-white">
                   {cart.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-6 text-center text-sm text-gray-500">No items in cart.</td>
+                      <td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-500">No items in cart.</td>
                     </tr>
                   ) : (
                     cart.map((line) => (
-                      <tr key={line.inventory_item_id}>
-                        <td className="px-4 py-2 text-sm text-gray-800">{line.item_code} - {line.item_name}</td>
-                        <td className="px-4 py-2 text-sm text-right text-gray-700">{line.quantity.toFixed(2)}</td>
-                        <td className="px-4 py-2 text-sm text-right text-gray-700">{line.unit_price.toFixed(2)}</td>
-                        <td className="px-4 py-2 text-sm text-right text-gray-900 font-semibold">{(line.quantity * line.unit_price).toFixed(2)}</td>
-                        <td className="px-4 py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => removeFromCart(line.inventory_item_id)}
-                            className="text-red-600 hover:text-red-800 text-sm"
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
+                      <Fragment key={line.row_id}>
+                        <tr className="bg-rose-50/60 border-t border-rose-100">
+                          <td colSpan={7} className="px-4 py-2.5">
+                            <div className="text-sm font-semibold text-gray-900">{line.item_name}</div>
+                            <div className="text-xs text-gray-600">Code: {line.item_code} | Unit: {line.unit}</div>
+                          </td>
+                        </tr>
+                        <tr className="border-b border-rose-100">
+                          <td className="px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">Details</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">{formatIssueTypeLabel(line.issue_type)}</td>
+                          <td className="px-4 py-2 text-sm text-right text-gray-700">{line.quantity.toFixed(2)}</td>
+                          <td className="px-4 py-2 text-sm text-right text-gray-700">{line.discount_amount.toFixed(2)}</td>
+                          <td className="px-4 py-2 text-sm text-right text-gray-700">{line.unit_price.toFixed(2)}</td>
+                          <td className="px-4 py-2 text-sm text-right text-gray-900 font-semibold">{(line.quantity * line.unit_price).toFixed(2)}</td>
+                          <td className="px-4 py-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(line.row_id)}
+                              className="text-red-600 hover:text-red-800 text-sm"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      </Fragment>
                     ))
                   )}
                 </tbody>
               </table>
             </div>
 
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Discount</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={discountAmount}
+                  onChange={(e) => setDiscountAmount(e.target.value)}
+                  className={formInputClassCompact}
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Paid Amount</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={paidAmount}
+                  onChange={(e) => setPaidAmount(e.target.value)}
+                  className={formInputClassCompact}
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Paid Type</label>
+                <select
+                  value={paymentType}
+                  onChange={(e) => setPaymentType(e.target.value as 'cash' | 'bank' | 'card' | 'online')}
+                  className={formInputClassCompact}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="bank">Bank</option>
+                  <option value="card">Card</option>
+                  <option value="online">Online</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Balance</label>
+                <input
+                  type="number"
+                  value={balanceAmount.toFixed(2)}
+                  className={`${formInputClassCompact} bg-slate-50`}
+                  readOnly
+                />
+              </div>
+            </div>
+
             <div className="mt-4 flex items-center justify-between">
               <div>
-                <div className="text-lg font-semibold text-gray-900">Total: {cartTotal.toFixed(2)}</div>
+                <div className="text-sm text-gray-600">Subtotal: {cartTotal.toFixed(2)}</div>
+                <div className="text-sm text-gray-600">Total Discount: {totalDiscountAmount.toFixed(2)}</div>
+                <div className="text-lg font-semibold text-gray-900">Grand Total: {payableTotal.toFixed(2)}</div>
+                <div className="text-sm text-gray-600">Paid ({paymentType.toUpperCase()}): {effectivePaidAmount.toFixed(2)}</div>
+                <div className="text-sm font-semibold text-rose-700">Balance: {balanceAmount.toFixed(2)}</div>
                 {selectedLoyaltyCustomerId > 0 && (
                   <div className="text-xs text-amber-700 font-medium">Loyalty points to award: {loyaltyPointsPreview.toFixed(2)}</div>
                 )}
@@ -1263,6 +1586,24 @@ export default function OutletPosPage() {
         </div>
 
       </main>
+
+      {noticeModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-rose-100 bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-semibold text-slate-900">{noticeModal.title}</h3>
+            <p className="mt-2 text-sm text-slate-600">{noticeModal.message}</p>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setNoticeModal({ isOpen: false, title: '', message: '' })}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

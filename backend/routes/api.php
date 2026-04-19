@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BackupRestoreSettingController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\SecuritySettingController;
+use App\Http\Controllers\SystemResetController;
 use App\Http\Controllers\SystemSettingController;
 use App\Http\Controllers\Api\HR\DepartmentController;
 use App\Http\Controllers\Api\HR\DesignationController;
@@ -60,12 +61,26 @@ Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanc
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('companies', CompanyController::class);
+    Route::get('petty-cash-transactions', [\App\Http\Controllers\PettyCashTransactionController::class, 'index']);
+    Route::post('petty-cash-transactions', [\App\Http\Controllers\PettyCashTransactionController::class, 'store']);
+    Route::delete('petty-cash-transactions/{id}', [\App\Http\Controllers\PettyCashTransactionController::class, 'destroy']);
+    Route::get('delivery-cash-transactions', [\App\Http\Controllers\DeliveryCashTransactionController::class, 'index']);
+    Route::post('delivery-cash-transactions', [\App\Http\Controllers\DeliveryCashTransactionController::class, 'store']);
+    Route::delete('delivery-cash-transactions/{id}', [\App\Http\Controllers\DeliveryCashTransactionController::class, 'destroy']);
+    Route::get('main-cash-transactions', [\App\Http\Controllers\MainCashTransactionController::class, 'index']);
+    Route::post('main-cash-transactions', [\App\Http\Controllers\MainCashTransactionController::class, 'store']);
+    Route::delete('main-cash-transactions/{id}', [\App\Http\Controllers\MainCashTransactionController::class, 'destroy']);
+    Route::get('cheque-registry', [\App\Http\Controllers\ChequeRegistryController::class, 'index']);
+    Route::post('cheque-registry/register', [\App\Http\Controllers\ChequeRegistryController::class, 'registerReceived']);
+    Route::post('cheque-registry/{id}/deposit', [\App\Http\Controllers\ChequeRegistryController::class, 'deposit']);
+    Route::post('cheque-registry/issue', [\App\Http\Controllers\ChequeRegistryController::class, 'issueCheque']);
     Route::get('system-settings', [SystemSettingController::class, 'show']);
     Route::put('system-settings', [SystemSettingController::class, 'update']);
     Route::get('security-settings', [SecuritySettingController::class, 'show']);
     Route::put('security-settings', [SecuritySettingController::class, 'update']);
     Route::get('backup-settings', [BackupRestoreSettingController::class, 'show']);
     Route::put('backup-settings', [BackupRestoreSettingController::class, 'update']);
+    Route::post('system/reset', [SystemResetController::class, 'reset']);
 
     // HRM Routes
     Route::prefix('hr')->group(function () {
@@ -138,6 +153,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Role and Permission Management Routes
     Route::apiResource('roles', \App\Http\Controllers\RoleController::class);
     Route::apiResource('permissions', \App\Http\Controllers\PermissionController::class);
+    Route::get('permissions-modules', [\App\Http\Controllers\PermissionController::class, 'modules']);
+    Route::get('permissions/by-module/{module}', [\App\Http\Controllers\PermissionController::class, 'byModule']);
+    Route::post('permissions/bulk-upsert', [\App\Http\Controllers\PermissionController::class, 'bulkUpsert']);
+    Route::post('permissions/assign-to-role', [\App\Http\Controllers\PermissionController::class, 'assignToRole']);
+    Route::post('permissions/remove-from-role', [\App\Http\Controllers\PermissionController::class, 'removeFromRole']);
     Route::put('roles/{role}/permissions', [\App\Http\Controllers\RoleController::class, 'updatePermissions']);
     Route::post('roles/assign-to-user', [\App\Http\Controllers\RoleController::class, 'assignToUser']);
     Route::post('roles/remove-from-user', [\App\Http\Controllers\RoleController::class, 'removeFromUser']);
@@ -169,6 +189,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Purchasing Routes
     // Route::apiResource('purchasing/purchase-orders', PurchaseOrderController::class);
     Route::apiResource('purchasing/purchase-orders', \App\Http\Controllers\Api\Purchasing\PurchaseOrderController::class);
+    Route::post('purchasing/grn/{grn}/payment', [GRNController::class, 'recordPayment']);
     Route::apiResource('purchasing/grn', \App\Http\Controllers\Api\Purchasing\GRNController::class);
 
     // Production - Formula Management (BOM)

@@ -14,10 +14,25 @@ class GoodsReceivedNote extends Model
         'received_date',
         'notes',
         'status',
+        'total_amount',
+        'discount_amount',
+        'net_amount',
+        'payment_status',
+        'payment_timing',
+        'payment_type',
+        'payment_reference',
+        'paid_amount',
+        'paid_at',
+        'payment_note',
     ];
 
     protected $casts = [
         'received_date' => 'date',
+        'paid_at' => 'datetime',
+        'total_amount' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
+        'net_amount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
     ];
 
     public function purchaseOrder(): BelongsTo

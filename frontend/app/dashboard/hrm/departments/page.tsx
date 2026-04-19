@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
@@ -16,6 +16,8 @@ export default function Departments() {
   const [token, setToken] = useState('');
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -25,6 +27,32 @@ export default function Departments() {
   // Form fields
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+
+  const filteredDepartments = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) return departments;
+
+    return departments.filter((department) =>
+      department.name?.toLowerCase().includes(keyword) ||
+      String(department.description || '').toLowerCase().includes(keyword)
+    );
+  }, [departments, searchTerm]);
+
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(filteredDepartments.length / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, filteredDepartments.length);
+  const paginatedDepartments = filteredDepartments.slice(startIndex, startIndex + pageSize);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -46,6 +74,7 @@ export default function Departments() {
         headers: { Authorization: `Bearer ${tokenToUse}`, Accept: 'application/json' },
       });
       setDepartments(response.data.data || []);
+      setCurrentPage(1);
     } catch (error) {
       const err: any = error;
       console.error('Error fetching departments:', err?.response?.status, err?.response?.data || err?.message);
@@ -86,8 +115,13 @@ export default function Departments() {
       setShowForm(false);
       resetForm();
     } catch (error) {
-      console.error('Error saving department:', error);
-      alert('Failed to save department. Please try again.');
+      const err: any = error;
+      console.error('Error saving department:', err?.response?.status, err?.response?.data || err?.message);
+      alert(
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        'Failed to save department. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -284,6 +318,26 @@ export default function Departments() {
               <span>Department List</span>
             </h3>
           </div>
+
+          <div className="px-6 py-4 border-b border-gray-200 bg-white/70">
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Filter by department name or description"
+                className="w-full sm:max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+              />
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
@@ -303,7 +357,7 @@ export default function Departments() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {departments.map((department) => (
+                {paginatedDepartments.map((department) => (
                   <tr key={department.id} className="hover:bg-gray-50 transition-colors duration-200">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {department.name}
@@ -338,6 +392,37 @@ export default function Departments() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div className="px-6 py-4 border-t border-gray-200 bg-white/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <p className="text-sm text-gray-600">
+              Showing {filteredDepartments.length === 0 ? 0 : startIndex + 1} to {endIndex} of {filteredDepartments.length} departments
+              {filteredDepartments.length !== departments.length ? ` (filtered from ${departments.length})` : ''}
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+
+              <span className="text-sm text-gray-700 px-2">
+                Page {currentPage} of {totalPages}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
       </main>

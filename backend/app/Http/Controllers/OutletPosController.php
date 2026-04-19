@@ -196,17 +196,24 @@ class OutletPosController extends Controller
 
     private function stockByOutlet(int $outletId)
     {
-        return DB::table('stock_transfers as st')
-            ->join('inventory_items as ii', 'st.inventory_item_id', '=', 'ii.id')
-            ->leftJoin('outlet_sale_items as osi', function ($join) use ($outletId) {
-                $join->on('osi.inventory_item_id', '=', 'st.inventory_item_id')
-                    ->whereIn('osi.outlet_sale_id', function ($q) use ($outletId) {
-                        $q->select('id')->from('outlet_sales')->where('outlet_id', $outletId);
-                    });
+        $transferred = DB::table('stock_transfers')
+            ->where('outlet_id', $outletId)
+            ->groupBy('inventory_item_id')
+            ->selectRaw('inventory_item_id, COALESCE(SUM(quantity),0) as transferred_qty');
+
+        $sold = DB::table('outlet_sale_items as osi')
+            ->join('outlet_sales as os', 'os.id', '=', 'osi.outlet_sale_id')
+            ->where('os.outlet_id', $outletId)
+            ->groupBy('osi.inventory_item_id')
+            ->selectRaw('osi.inventory_item_id, COALESCE(SUM(osi.quantity),0) as sold_qty');
+
+        return DB::query()
+            ->fromSub($transferred, 'tr')
+            ->join('inventory_items as ii', 'tr.inventory_item_id', '=', 'ii.id')
+            ->leftJoinSub($sold, 'sd', function ($join) {
+                $join->on('sd.inventory_item_id', '=', 'tr.inventory_item_id');
             })
-            ->where('st.outlet_id', $outletId)
-            ->groupBy('st.inventory_item_id', 'ii.name', 'ii.code', 'ii.unit')
-                ->selectRaw('st.inventory_item_id, ii.name, ii.code, ii.unit, COALESCE(MAX(ii.sell_price), MAX(ii.unit_price), 0) as sell_price, COALESCE(SUM(st.quantity),0) as transferred_qty, COALESCE(SUM(osi.quantity),0) as sold_qty, (COALESCE(SUM(st.quantity),0) - COALESCE(SUM(osi.quantity),0)) as available_qty')
+            ->selectRaw('tr.inventory_item_id, ii.name, ii.code, ii.unit, COALESCE(ii.sell_price, ii.unit_price, 0) as sell_price, tr.transferred_qty, COALESCE(sd.sold_qty,0) as sold_qty, (tr.transferred_qty - COALESCE(sd.sold_qty,0)) as available_qty')
             ->orderBy('ii.name')
             ->get();
     }
@@ -562,10 +569,11 @@ class OutletPosController extends Controller
             ->selectRaw('COUNT(*) as total_sales, COALESCE(SUM(total_amount),0) as total_sales_amount')
             ->first();
 
-        $openingBalance = $session ? (float) ($session->opening_balance ?? 0) : 0;
+        $drawerBalance = (float) ($this->cashDrawerByOutlet($activeOutlet->id)['balance'] ?? 0);
+        $openingBalance = $session ? (float) ($session->opening_balance ?? 0) : $drawerBalance;
         $closingBalance = $session && $session->closing_balance !== null
             ? (float) $session->closing_balance
-            : (float) ($this->cashDrawerByOutlet($activeOutlet->id)['balance'] ?? 0);
+            : $drawerBalance;
 
         return response()->json([
             'success' => true,
@@ -858,7 +866,7 @@ class OutletPosController extends Controller
             'outlet:id,name,code',
             'soldByUser:id,name,email',
             'loyaltyCustomer:id,customer_code,name,phone,points_balance',
-            'items:id,outlet_sale_id,inventory_item_id,item_code,item_name,unit,quantity,unit_price,line_total',
+            'items:id,outlet_sale_id,inventory_item_id,item_code,item_name,unit,issue_type,discount_amount,quantity,unit_price,line_total',
         ]);
 
         if (!$admin && $outlet) {
@@ -929,11 +937,16 @@ class OutletPosController extends Controller
             'sale_date' => 'nullable|date',
             'customer_name' => 'nullable|string|max:255',
             'loyalty_customer_id' => 'nullable|exists:outlet_loyalty_customers,id',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'paid_amount' => 'nullable|numeric|min:0',
+            'payment_type' => 'nullable|in:cash,bank,card,online',
             'notes' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.inventory_item_id' => 'required|exists:inventory_items,id',
             'items.*.quantity' => 'required|numeric|gt:0',
             'items.*.unit_price' => 'required|numeric|min:0',
+            'items.*.issue_type' => 'nullable|in:free,sample,retail,wholesale,van_sale',
+            'items.*.discount_amount' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -1000,6 +1013,14 @@ class OutletPosController extends Controller
                     $inventoryItemId = (int) $line['inventory_item_id'];
                     $qty = (float) $line['quantity'];
                     $price = (float) $line['unit_price'];
+                    $issueType = (string) ($line['issue_type'] ?? 'retail');
+                    $discountAmount = max((float) ($line['discount_amount'] ?? 0), 0);
+
+                    if (in_array($issueType, ['free', 'sample'], true)) {
+                        $price = 0;
+                    } else {
+                        $price = max($price - $discountAmount, 0);
+                    }
 
                     $stockLine = $stock->get($inventoryItemId);
                     $available = $stockLine ? (float) $stockLine->available_qty : 0;
@@ -1017,14 +1038,28 @@ class OutletPosController extends Controller
                         'item_code' => (string) ($stockLine->code ?? ''),
                         'item_name' => (string) ($stockLine->name ?? ''),
                         'unit' => (string) ($stockLine->unit ?? ''),
+                        'issue_type' => $issueType,
+                        'discount_amount' => in_array($issueType, ['free', 'sample'], true)
+                            ? (float) ($line['unit_price'] ?? 0)
+                            : $discountAmount,
                         'quantity' => $qty,
                         'unit_price' => $price,
                         'line_total' => $lineTotal,
                     ];
                 }
 
+                $discountAmount = min(max((float) ($payload['discount_amount'] ?? 0), 0), $totalAmount);
+                $netTotalAmount = max($totalAmount - $discountAmount, 0);
+                $paidAmount = max((float) ($payload['paid_amount'] ?? 0), 0);
+                $balanceAmount = max($netTotalAmount - $paidAmount, 0);
+                $paymentType = $payload['payment_type'] ?? 'cash';
+
+                if ($balanceAmount > 0 && !$loyaltyCustomer) {
+                    throw new \RuntimeException('Credit sale is allowed only for loyalty customers. Please select a loyalty customer.');
+                }
+
                 $pointsAwarded = $loyaltyCustomer
-                    ? round($totalAmount * self::LOYALTY_POINT_RATE, 2)
+                    ? round($netTotalAmount * self::LOYALTY_POINT_RATE, 2)
                     : 0;
 
                 $sale = OutletSale::create([
@@ -1035,7 +1070,11 @@ class OutletPosController extends Controller
                     'customer_name' => $payload['customer_name'] ?? null,
                     'loyalty_customer_id' => $loyaltyCustomer ? (int) $loyaltyCustomer->id : null,
                     'total_quantity' => $totalQty,
-                    'total_amount' => $totalAmount,
+                    'total_amount' => $netTotalAmount,
+                    'discount_amount' => $discountAmount,
+                    'paid_amount' => $paidAmount,
+                    'payment_type' => $paymentType,
+                    'balance_amount' => $balanceAmount,
                     'loyalty_points_awarded' => $pointsAwarded,
                     'notes' => $payload['notes'] ?? null,
                 ]);
@@ -1043,6 +1082,42 @@ class OutletPosController extends Controller
                 foreach ($itemsToSave as $line) {
                     $line['outlet_sale_id'] = $sale->id;
                     OutletSaleItem::create($line);
+                }
+
+                if (Schema::hasTable('outlet_cash_drawers')) {
+                    $cashReceived = $netTotalAmount;
+
+                    if ($cashReceived > 0) {
+                        $drawer = DB::table('outlet_cash_drawers')
+                            ->where('outlet_id', $activeOutlet->id)
+                            ->lockForUpdate()
+                            ->first();
+
+                        $now = now();
+                        $note = sprintf('%s sale %s (+%.2f)', strtoupper((string) $paymentType), (string) $sale->sale_number, $cashReceived);
+
+                        if ($drawer) {
+                            DB::table('outlet_cash_drawers')
+                                ->where('outlet_id', $activeOutlet->id)
+                                ->update([
+                                    'balance' => (float) ($drawer->balance ?? 0) + $cashReceived,
+                                    'last_set_by' => $user?->id,
+                                    'last_set_at' => $now,
+                                    'note' => $note,
+                                    'updated_at' => $now,
+                                ]);
+                        } else {
+                            DB::table('outlet_cash_drawers')->insert([
+                                'outlet_id' => $activeOutlet->id,
+                                'balance' => $cashReceived,
+                                'last_set_by' => $user?->id,
+                                'last_set_at' => $now,
+                                'note' => $note,
+                                'created_at' => $now,
+                                'updated_at' => $now,
+                            ]);
+                        }
+                    }
                 }
 
                 if ($loyaltyCustomer) {
@@ -1060,7 +1135,7 @@ class OutletPosController extends Controller
                     'outlet:id,name,code',
                     'soldByUser:id,name,email',
                     'loyaltyCustomer:id,customer_code,name,phone,points_balance',
-                    'items:id,outlet_sale_id,inventory_item_id,item_code,item_name,unit,quantity,unit_price,line_total',
+                    'items:id,outlet_sale_id,inventory_item_id,item_code,item_name,unit,issue_type,discount_amount,quantity,unit_price,line_total',
                 ]);
             });
 
@@ -1145,7 +1220,7 @@ class OutletPosController extends Controller
         $sales = (clone $baseQuery)
             ->with([
                 'soldByUser:id,name,email',
-                'items:id,outlet_sale_id,inventory_item_id,item_code,item_name,unit,quantity,unit_price,line_total',
+                'items:id,outlet_sale_id,inventory_item_id,item_code,item_name,unit,issue_type,discount_amount,quantity,unit_price,line_total',
             ])
             ->orderByDesc('sale_date')
             ->orderByDesc('id')

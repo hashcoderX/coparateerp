@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\DistributionInvoice;
 use App\Models\DistributionPayment;
+use App\Models\DistributionCustomer;
 use App\Models\Load;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -139,6 +140,13 @@ class DistributionPaymentController extends Controller
                 }
             }
 
+            $customer = DistributionCustomer::find($payload['customer_id']);
+            if ($customer) {
+                $currentOutstanding = (float) ($customer->outstanding ?? 0);
+                $customer->outstanding = max(0, $currentOutstanding - (float) $payload['amount']);
+                $customer->save();
+            }
+
             return $payment;
         });
 
@@ -224,7 +232,33 @@ class DistributionPaymentController extends Controller
             ], 404);
         }
 
-        $payment->delete();
+        DB::transaction(function () use ($payment) {
+            $customer = DistributionCustomer::find($payment->customer_id);
+            if ($customer) {
+                $currentOutstanding = (float) ($customer->outstanding ?? 0);
+                $customer->outstanding = max(0, $currentOutstanding + (float) $payment->amount);
+                $customer->save();
+            }
+
+            if (!empty($payment->distribution_invoice_id)) {
+                $invoice = DistributionInvoice::find($payment->distribution_invoice_id);
+                if ($invoice) {
+                    $invoice->paid_amount = max(0, (float) $invoice->paid_amount - (float) $payment->amount);
+
+                    if ((float) $invoice->paid_amount >= (float) $invoice->total) {
+                        $invoice->status = 'paid';
+                    } elseif ((float) $invoice->paid_amount > 0) {
+                        $invoice->status = 'partial';
+                    } else {
+                        $invoice->status = 'pending';
+                    }
+
+                    $invoice->save();
+                }
+            }
+
+            $payment->delete();
+        });
 
         return response()->json([
             'success' => true,

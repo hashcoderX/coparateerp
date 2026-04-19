@@ -39,15 +39,43 @@ interface UserRole {
 
 const PERMISSION_SECTION_ORDER = [
   { key: 'distribution', label: 'Distribution' },
+  { key: 'accounts', label: 'Accounts' },
   { key: 'hrm', label: 'HRM' },
   { key: 'purchasing', label: 'Purchasing' },
   { key: 'stock', label: 'Stock' },
+  { key: 'production', label: 'Production' },
   { key: 'vehicle-loading', label: 'Vehicle Loading' },
+  { key: 'outlet-pos', label: 'Outlet POS' },
+  { key: 'reports', label: 'Reports' },
+  { key: 'settings', label: 'Settings' },
   { key: 'branches', label: 'Branches' },
   { key: 'other', label: 'Other' },
 ];
 
 const SECTION_FALLBACK_ACTIONS: Record<string, string[]> = {
+  accounts: [
+    'View Main Account',
+    'Manage Main Account',
+    'View Transaction Book',
+    'Manage Transaction Book',
+    'View Petty Cash',
+    'Manage Petty Cash',
+    'View Delivery Cash',
+    'Manage Delivery Cash',
+    'Approve Outlet Transfers',
+  ],
+  hrm: [
+    'View Employees',
+    'Manage Employees',
+    'View Departments',
+    'Manage Departments',
+    'View Designations',
+    'Manage Designations',
+    'Manage Attendance',
+    'Manage Leave',
+    'Manage Payroll',
+    'Manage Candidates',
+  ],
   distribution: [
     'View Customers',
     'Manage Customers',
@@ -69,6 +97,14 @@ const SECTION_FALLBACK_ACTIONS: Record<string, string[]> = {
     'Manage Transfers',
     'Manage Suppliers',
   ],
+  production: [
+    'View Production Plans',
+    'Manage Production Plans',
+    'Manage BOM',
+    'Manage Production Execution',
+    'Manage QC',
+    'Manage Packaging',
+  ],
   'vehicle-loading': [
     'View Vehicles',
     'Manage Vehicles',
@@ -78,10 +114,37 @@ const SECTION_FALLBACK_ACTIONS: Record<string, string[]> = {
     'Manage Loads',
     'Manage Load Items',
   ],
+  'outlet-pos': [
+    'View Sales',
+    'Create Sales',
+    'Manage Cash Drawer',
+    'Manage Loyalty Customers',
+    'View Outlet Reports',
+  ],
+  reports: [
+    'View HR Reports',
+    'View Distribution Reports',
+    'View Purchasing Reports',
+    'View Stock Reports',
+    'View Vehicle Loading Reports',
+  ],
+  settings: [
+    'Manage System Settings',
+    'Manage Security Settings',
+    'Manage Backup Settings',
+    'Manage Company Settings',
+  ],
   branches: [
     'View Branches',
     'Manage Branches',
     'View Branch Stock Report',
+  ],
+  other: [
+    'Manage Roles',
+    'Manage Permissions',
+    'Manage System Settings',
+    'Manage Security Settings',
+    'Manage Backup Settings',
   ],
 };
 
@@ -92,7 +155,75 @@ const toPermissionSlug = (value: string) =>
     .replace(/^_+|_+$/g, '');
 
 const inferPermissionSection = (permission: Permission): string => {
-  const haystack = `${permission.module || ''} ${permission.name || ''}`.toLowerCase();
+  const moduleValue = String(permission.module || '').toLowerCase();
+  const permissionName = String(permission.name || '').toLowerCase();
+  const haystack = `${moduleValue} ${permissionName} ${String(permission.description || '').toLowerCase()}`;
+
+  const normalizedModule = moduleValue
+    .replace(/[_.]+/g, '-')
+    .replace(/\s+/g, '-')
+    .trim();
+
+  if (normalizedModule === 'hrm' || normalizedModule === 'hr') {
+    return 'hrm';
+  }
+
+  if (normalizedModule === 'distribution') {
+    return 'distribution';
+  }
+
+  if (normalizedModule === 'accounts' || normalizedModule === 'account' || normalizedModule === 'finance') {
+    return 'accounts';
+  }
+
+  if (normalizedModule === 'purchasing' || normalizedModule === 'purchase') {
+    return 'purchasing';
+  }
+
+  if (normalizedModule === 'stock' || normalizedModule === 'inventory') {
+    return 'stock';
+  }
+
+  if (normalizedModule === 'production') {
+    return 'production';
+  }
+
+  if (normalizedModule === 'vehicle-loading' || normalizedModule === 'vehicle' || normalizedModule === 'loading') {
+    return 'vehicle-loading';
+  }
+
+  if (normalizedModule === 'outlet-pos' || normalizedModule === 'outlet' || normalizedModule === 'pos') {
+    return 'outlet-pos';
+  }
+
+  if (normalizedModule === 'reports' || normalizedModule === 'report') {
+    return 'reports';
+  }
+
+  if (
+    normalizedModule === 'settings' ||
+    normalizedModule === 'system-management' ||
+    normalizedModule === 'security-management' ||
+    normalizedModule === 'backup-management'
+  ) {
+    return 'settings';
+  }
+
+  if (normalizedModule === 'branches' || normalizedModule === 'branch' || normalizedModule === 'outlet') {
+    return 'branches';
+  }
+
+  if (
+    haystack.includes('account') ||
+    haystack.includes('accounts') ||
+    haystack.includes('cash book') ||
+    haystack.includes('transaction book') ||
+    haystack.includes('petty cash') ||
+    haystack.includes('delivery cash') ||
+    haystack.includes('main account')
+  ) {
+    return 'accounts';
+  }
 
   if (
     haystack.includes('distribution') ||
@@ -133,6 +264,36 @@ const inferPermissionSection = (permission: Permission): string => {
   }
 
   if (
+    haystack.includes('production') ||
+    haystack.includes('bom') ||
+    haystack.includes('packaging') ||
+    haystack.includes('qc')
+  ) {
+    return 'production';
+  }
+
+  if (
+    haystack.includes('outlet') ||
+    haystack.includes('pos') ||
+    haystack.includes('cash drawer') ||
+    haystack.includes('loyalty')
+  ) {
+    return 'outlet-pos';
+  }
+
+  if (haystack.includes('report')) {
+    return 'reports';
+  }
+
+  if (
+    haystack.includes('setting') ||
+    haystack.includes('security') ||
+    haystack.includes('backup')
+  ) {
+    return 'settings';
+  }
+
+  if (
     haystack.includes('branch') ||
     haystack.includes('outlet')
   ) {
@@ -156,6 +317,7 @@ const inferPermissionSection = (permission: Permission): string => {
 };
 export default function Roles() {
   const [token, setToken] = useState('');
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [userRoles, setUserRoles] = useState<UserRole[]>([]);
@@ -172,6 +334,7 @@ export default function Roles() {
   const [roleDescription, setRoleDescription] = useState('');
   const [selectedPermissions, setSelectedPermissions] = useState<number[]>([]);
   const [isActive, setIsActive] = useState(true);
+  const [formError, setFormError] = useState('');
 
   // Assignment fields
   const [selectedUser, setSelectedUser] = useState('');
@@ -284,6 +447,27 @@ export default function Roles() {
     return map;
   }, [virtualPermissions]);
 
+  const getSectionPermissionItems = (sectionKey: string) => {
+    const section = permissionSections.find((item) => item.key === sectionKey);
+    if (!section) return [] as Permission[];
+
+    if (section.permissions.length > 0) {
+      return section.permissions;
+    }
+
+    return virtualPermissions.filter((permission) => inferPermissionSection(permission) === sectionKey);
+  };
+
+  const allPermissionOptions = useMemo(
+    () => permissionSections.flatMap((section) => getSectionPermissionItems(section.key)),
+    [permissionSections, virtualPermissions]
+  );
+
+  const allPermissionsSelected = useMemo(
+    () => allPermissionOptions.length > 0 && allPermissionOptions.every((permission) => selectedPermissions.includes(permission.id)),
+    [allPermissionOptions, selectedPermissions]
+  );
+
   const resolveSelectedPermissionIds = async () => {
     const resolvedIds = selectedPermissions.filter((id) => id > 0);
     const virtualIds = selectedPermissions.filter((id) => id < 0);
@@ -294,6 +478,70 @@ export default function Roles() {
       existingByName.set(String(permission.name || '').toLowerCase(), permission);
     });
 
+    const toCreate = virtualIds
+      .map((id) => virtualPermissionById.get(id))
+      .filter((virtual): virtual is Permission => Boolean(virtual))
+      .filter((virtual) => !existingByName.has(virtual.name.toLowerCase()))
+      .map((virtual) => ({
+        name: virtual.name,
+        description: virtual.description,
+        module: virtual.module,
+        is_active: true,
+      }));
+
+    if (toCreate.length > 0) {
+      try {
+        const bulkRes = await axios.post(
+          `${API_URL}/api/permissions/bulk-upsert`,
+          { permissions: toCreate },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        const createdRows = Array.isArray(bulkRes.data)
+          ? bulkRes.data
+          : (bulkRes.data?.data || []);
+
+        createdRows.forEach((created: any) => {
+          const createdId = Number(created?.id || 0);
+          const createdName = String(created?.name || '').toLowerCase();
+          if (createdId > 0 && createdName) {
+            resolvedIds.push(createdId);
+            existingByName.set(createdName, {
+              id: createdId,
+              name: String(created?.name || ''),
+              module: String(created?.module || ''),
+              description: String(created?.description || ''),
+              is_active: created?.is_active !== false,
+            });
+          }
+        });
+      } catch (error) {
+        console.error('Failed to bulk-create permissions, falling back to single create.', error);
+
+        for (const row of toCreate) {
+          try {
+            const createRes = await axios.post(`${API_URL}/api/permissions`, row, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+
+            const created = createRes.data;
+            if (created?.id) {
+              resolvedIds.push(Number(created.id));
+              existingByName.set(String(created?.name || row.name).toLowerCase(), {
+                id: Number(created.id),
+                name: String(created?.name || row.name),
+                module: String(created?.module || row.module || ''),
+                description: String(created?.description || row.description || ''),
+                is_active: created?.is_active !== false,
+              });
+            }
+          } catch (singleError) {
+            console.error(`Failed to auto-create permission: ${row.name}`, singleError);
+          }
+        }
+      }
+    }
+
     for (const id of virtualIds) {
       const virtual = virtualPermissionById.get(id);
       if (!virtual) continue;
@@ -301,29 +549,6 @@ export default function Roles() {
       const existing = existingByName.get(virtual.name.toLowerCase());
       if (existing?.id) {
         resolvedIds.push(existing.id);
-        continue;
-      }
-
-      try {
-        const createRes = await axios.post('http://localhost:8000/api/permissions', {
-          name: virtual.name,
-          description: virtual.description,
-          module: virtual.module,
-          is_active: true,
-        }, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        const created = createRes.data;
-        if (created?.id) {
-          resolvedIds.push(Number(created.id));
-          existingByName.set(virtual.name.toLowerCase(), {
-            ...virtual,
-            id: Number(created.id),
-          });
-        }
-      } catch (error) {
-        console.error(`Failed to auto-create permission: ${virtual.name}`, error);
       }
     }
 
@@ -368,10 +593,8 @@ export default function Roles() {
   };
 
   const toggleSectionPermissions = (sectionKey: string) => {
-    const section = permissionSections.find((item) => item.key === sectionKey);
-    if (!section) return;
-
-    const sectionPermissionIds = section.permissions.map((permission) => permission.id);
+    const sectionPermissionIds = getSectionPermissionItems(sectionKey).map((permission) => permission.id);
+    if (sectionPermissionIds.length === 0) return;
     const allSelected = sectionPermissionIds.every((id) => selectedPermissions.includes(id));
 
     setSelectedPermissions((prev) => {
@@ -382,12 +605,25 @@ export default function Roles() {
     });
   };
 
+  const toggleAllPermissions = () => {
+    const allIds = allPermissionOptions.map((permission) => permission.id);
+    if (allIds.length === 0) return;
+
+    setSelectedPermissions((prev) => {
+      const currentlyAllSelected = allIds.every((id) => prev.includes(id));
+      if (currentlyAllSelected) {
+        return prev.filter((id) => !allIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...allIds]));
+    });
+  };
+
   const fetchRoles = async (authToken?: string) => {
     const tokenToUse = authToken || token;
     if (!tokenToUse) return;
 
     try {
-      const response = await axios.get('http://localhost:8000/api/roles', {
+      const response = await axios.get(`${API_URL}/api/roles`, {
         headers: { Authorization: `Bearer ${tokenToUse}` },
         params: { per_page: 1000 }
       });
@@ -438,7 +674,7 @@ export default function Roles() {
     if (!tokenToUse) return;
 
     try {
-      const response = await axios.get('http://localhost:8000/api/permissions', {
+      const response = await axios.get(`${API_URL}/api/permissions`, {
         headers: { Authorization: `Bearer ${tokenToUse}` },
         params: { per_page: 1000 }
       });
@@ -449,6 +685,13 @@ export default function Roles() {
       // For demo purposes, set some sample data
       setPermissions([
         { id: 1, name: 'distribution.view_customers', module: 'distribution', description: 'View distribution customers', is_active: true },
+        { id: 9, name: 'accounts.view_main_account', module: 'accounts', description: 'View main account', is_active: true },
+        { id: 10, name: 'accounts.manage_main_account', module: 'accounts', description: 'Manage main account transactions', is_active: true },
+        { id: 11, name: 'accounts.view_petty_cash', module: 'accounts', description: 'View petty cash', is_active: true },
+        { id: 12, name: 'accounts.manage_petty_cash', module: 'accounts', description: 'Manage petty cash transactions', is_active: true },
+        { id: 13, name: 'accounts.view_delivery_cash', module: 'accounts', description: 'View delivery cash', is_active: true },
+        { id: 14, name: 'accounts.manage_delivery_cash', module: 'accounts', description: 'Manage delivery cash transactions', is_active: true },
+        { id: 15, name: 'accounts.view_transaction_book', module: 'accounts', description: 'View transaction book', is_active: true },
         { id: 2, name: 'distribution.manage_invoices', module: 'distribution', description: 'Create and manage invoices', is_active: true },
         { id: 3, name: 'hrm.view_employees', module: 'hrm', description: 'View employee records', is_active: true },
         { id: 4, name: 'hrm.manage_payroll', module: 'hrm', description: 'Manage payroll', is_active: true },
@@ -465,7 +708,7 @@ export default function Roles() {
     if (!tokenToUse) return;
 
     try {
-      const response = await axios.get('http://localhost:8000/api/hr/employees', {
+      const response = await axios.get(`${API_URL}/api/hr/employees`, {
         headers: { Authorization: `Bearer ${tokenToUse}` },
         params: { per_page: 1000 }
       });
@@ -482,11 +725,13 @@ export default function Roles() {
     setSelectedPermissions([]);
     setIsActive(true);
     setEditingRole(null);
+    setFormError('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setFormError('');
 
     const resolvedPermissions = await resolveSelectedPermissionIds();
 
@@ -499,11 +744,11 @@ export default function Roles() {
 
     try {
       if (editingRole) {
-        await axios.put(`http://localhost:8000/api/roles/${editingRole.id}`, roleData, {
+        await axios.put(`${API_URL}/api/roles/${editingRole.id}`, roleData, {
           headers: { Authorization: `Bearer ${token}` },
         });
       } else {
-        await axios.post('http://localhost:8000/api/roles', roleData, {
+        await axios.post(`${API_URL}/api/roles`, roleData, {
           headers: { Authorization: `Bearer ${token}` },
         });
       }
@@ -511,31 +756,24 @@ export default function Roles() {
       setShowForm(false);
       resetForm();
     } catch (error) {
-      console.error('Error saving role:', error);
-      // For demo purposes, simulate success
-      const newRole: Role = {
-        id: editingRole ? editingRole.id : Date.now(),
-        name: roleName,
-        description: roleDescription,
-        permissions: permissions.filter(p => selectedPermissions.includes(p.id)),
-        is_active: isActive,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      if (editingRole) {
-        setRoles(roles.map(r => r.id === editingRole.id ? newRole : r));
-      } else {
-        setRoles([...roles, newRole]);
-      }
-      setShowForm(false);
-      resetForm();
+      const err: any = error;
+      console.error('Error saving role:', err?.response?.status, err?.response?.data || err?.message);
+      const validationErrors = err?.response?.data?.errors;
+      const firstValidationError = validationErrors && typeof validationErrors === 'object'
+        ? String(Object.values(validationErrors).flat()[0] || '')
+        : '';
+      setFormError(
+        err?.response?.data?.message ||
+        firstValidationError ||
+        'Failed to save role. Please check the form and try again.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
   const handleEdit = (role: Role) => {
+    setFormError('');
     setEditingRole(role);
     setRoleName(role.name);
     setRoleDescription(role.description);
@@ -546,7 +784,7 @@ export default function Roles() {
 
   const handleDelete = async (id: number) => {
     try {
-      await axios.delete(`http://localhost:8000/api/roles/${id}`, {
+      await axios.delete(`${API_URL}/api/roles/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       fetchRoles();
@@ -584,11 +822,12 @@ export default function Roles() {
 
   const savePermissions = async () => {
     if (!activeRole) return;
+    setFormError('');
 
     try {
       const resolvedPermissions = await resolveSelectedPermissionIds();
 
-      await axios.put(`http://localhost:8000/api/roles/${activeRole.id}/permissions`, {
+      await axios.put(`${API_URL}/api/roles/${activeRole.id}/permissions`, {
         permissions: resolvedPermissions
       }, {
         headers: { Authorization: `Bearer ${token}` },
@@ -596,14 +835,9 @@ export default function Roles() {
       fetchRoles();
       setShowPermissionsModal(false);
     } catch (error) {
-      console.error('Error saving permissions:', error);
-      // For demo purposes, simulate success
-      const updatedRole = {
-        ...activeRole,
-        permissions: permissions.filter(p => selectedPermissions.includes(p.id))
-      };
-      setRoles(roles.map(r => r.id === activeRole.id ? updatedRole : r));
-      setShowPermissionsModal(false);
+      const err: any = error;
+      console.error('Error saving permissions:', err?.response?.status, err?.response?.data || err?.message);
+      setFormError(err?.response?.data?.message || 'Failed to save permissions.');
     }
   };
 
@@ -617,7 +851,7 @@ export default function Roles() {
     if (!selectedUser || !selectedRole) return;
 
     try {
-      await axios.post('http://localhost:8000/api/roles/assign-to-user', {
+      await axios.post(`${API_URL}/api/roles/assign-to-user`, {
         user_id: selectedUser,
         role_id: selectedRole
       }, {
@@ -657,16 +891,13 @@ export default function Roles() {
             </div>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
               <button
-                onClick={() => setShowForm(true)}
+                onClick={() => {
+                  resetForm();
+                  setShowForm(true);
+                }}
                 className="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white px-4 py-2 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
               >
                 Add Role
-              </button>
-              <button
-                onClick={openAssignModal}
-                className="w-full sm:w-auto bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-4 py-2 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
-              >
-                Assign Role
               </button>
             </div>
           </div>
@@ -682,7 +913,7 @@ export default function Roles() {
               🔐
             </div>
             <div>
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">Roles & Privileges</h1>
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">Roles(Designation) & Privileges</h1>
               <p className="text-sm sm:text-base md:text-lg text-gray-600">Manage user roles and access permissions</p>
             </div>
           </div>
@@ -797,6 +1028,11 @@ export default function Roles() {
               </h3>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              {formError ? (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {formError}
+                </div>
+              ) : null}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -827,20 +1063,27 @@ export default function Roles() {
                   <label className="block text-sm font-medium text-gray-700 mb-2 mb-3">
                     Permissions
                   </label>
+                  <div className="flex justify-end mb-3">
+                    <button
+                      type="button"
+                      onClick={toggleAllPermissions}
+                      className="px-3 py-1.5 text-xs rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                    >
+                      {allPermissionsSelected ? 'Clear All' : 'Select All'}
+                    </button>
+                  </div>
                   <div className="space-y-4 max-h-72 overflow-y-auto border border-gray-200 rounded-xl p-4 bg-gray-50">
                     {permissionSections.map((section) => {
-                      const sectionPermissionIds = section.permissions.map((permission) => permission.id);
+                      const sectionItems = getSectionPermissionItems(section.key);
+                      const sectionPermissionIds = sectionItems.map((permission) => permission.id);
                       const allSelected = sectionPermissionIds.length > 0 && sectionPermissionIds.every((id) => selectedPermissions.includes(id));
-                      const fallbackPermissions = section.permissions.length === 0
-                        ? virtualPermissions.filter((permission) => inferPermissionSection(permission) === section.key)
-                        : [];
 
                       return (
                         <div key={section.key} className="rounded-xl border border-gray-200 bg-white p-3">
                           <div className="flex items-center justify-between mb-2">
                             <div>
                               <p className="text-sm font-semibold text-gray-900">{section.label}</p>
-                              <p className="text-xs text-gray-500">{section.permissions.length} permission(s)</p>
+                              <p className="text-xs text-gray-500">{sectionItems.length} permission(s)</p>
                               {getDisplayActions(section.key).length ? (
                                 <p className="text-[11px] text-gray-500 mt-0.5">
                                   Actions: {getDisplayActions(section.key).join(', ')}
@@ -857,7 +1100,7 @@ export default function Roles() {
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            {section.permissions.map((permission) => (
+                            {sectionItems.map((permission) => (
                               <label key={permission.id} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-50 transition-colors duration-200">
                                 <input
                                   type="checkbox"
@@ -866,23 +1109,10 @@ export default function Roles() {
                                   className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
                                 />
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-gray-900">{permission.name}</p>
-                                  <p className="text-xs text-gray-600">{permission.description}</p>
-                                </div>
-                              </label>
-                            ))}
-
-                            {fallbackPermissions.map((permission) => (
-                              <label key={`${section.key}-fallback-${permission.id}`} className="flex items-center space-x-3 p-2 rounded-lg bg-gray-50 border border-dashed border-gray-200">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedPermissions.includes(permission.id)}
-                                  onChange={() => handlePermissionToggle(permission.id)}
-                                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-gray-700">{permission.description}</p>
-                                  <p className="text-xs text-gray-500">Will be created when saved</p>
+                                  <p className="text-sm font-medium text-gray-900">{permission.name || permission.description}</p>
+                                  <p className="text-xs text-gray-600">
+                                    {permission.id < 0 ? 'Will be created when saved' : permission.description}
+                                  </p>
                                 </div>
                               </label>
                             ))}
@@ -962,18 +1192,16 @@ export default function Roles() {
             <div className="space-y-6">
               <div className="space-y-4">
                 {permissionSections.map((section) => {
-                  const sectionPermissionIds = section.permissions.map((permission) => permission.id);
+                  const sectionItems = getSectionPermissionItems(section.key);
+                  const sectionPermissionIds = sectionItems.map((permission) => permission.id);
                   const allSelected = sectionPermissionIds.length > 0 && sectionPermissionIds.every((id) => selectedPermissions.includes(id));
-                  const fallbackPermissions = section.permissions.length === 0
-                    ? virtualPermissions.filter((permission) => inferPermissionSection(permission) === section.key)
-                    : [];
 
                   return (
                     <div key={section.key} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                       <div className="flex items-center justify-between mb-3">
                         <div>
                           <h4 className="text-sm font-semibold text-gray-900">{section.label}</h4>
-                          <p className="text-xs text-gray-500">{section.permissions.length} permission(s)</p>
+                          <p className="text-xs text-gray-500">{sectionItems.length} permission(s)</p>
                           {getDisplayActions(section.key).length ? (
                             <p className="text-[11px] text-gray-500 mt-0.5">
                               Actions: {getDisplayActions(section.key).join(', ')}
@@ -990,28 +1218,13 @@ export default function Roles() {
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {section.permissions.map((permission) => (
+                        {sectionItems.map((permission) => (
                           <div key={permission.id} className="flex items-center justify-between p-3 border border-gray-200 bg-white rounded-lg hover:border-indigo-300 transition-colors duration-200">
                             <div className="flex-1">
-                              <h5 className="text-sm font-medium text-gray-900">{permission.name}</h5>
-                              <p className="text-xs text-gray-600">{permission.description}</p>
-                            </div>
-                            <label className="flex items-center">
-                              <input
-                                type="checkbox"
-                                checked={selectedPermissions.includes(permission.id)}
-                                onChange={() => handlePermissionToggle(permission.id)}
-                                className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                              />
-                            </label>
-                          </div>
-                        ))}
-
-                        {fallbackPermissions.map((permission) => (
-                          <div key={`${section.key}-fallback-${permission.id}`} className="flex items-center justify-between p-3 border border-dashed border-gray-200 bg-white rounded-lg">
-                            <div className="flex-1">
-                              <h5 className="text-sm font-medium text-gray-700">{permission.description}</h5>
-                              <p className="text-xs text-gray-500">Will be created when saved</p>
+                              <h5 className="text-sm font-medium text-gray-900">{permission.name || permission.description}</h5>
+                              <p className="text-xs text-gray-600">
+                                {permission.id < 0 ? 'Will be created when saved' : permission.description}
+                              </p>
                             </div>
                             <label className="flex items-center">
                               <input

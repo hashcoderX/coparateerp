@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import axios from 'axios';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 type CashDrawer = {
   outlet_id: number;
@@ -300,6 +302,61 @@ export default function OutletCashDrawerPage() {
     downloadCsv(`cash-drawer-transactions-${fromDate}-to-${toDate}.csv`, [header, ...rows]);
   };
 
+  const handleDownloadTransactionsPdf = () => {
+    if (transactionRows.length === 0) {
+      alert('No transaction records available for selected date range.');
+      return;
+    }
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const reportTitle = 'Cash Drawer Transaction Records';
+    const outletLabel = `Outlet: ${outletName} (${outletCode})`;
+    const dateRangeLabel = `Date Range: ${fromDate} to ${toDate}`;
+
+    doc.setFontSize(14);
+    doc.text(reportTitle, 40, 36);
+    doc.setFontSize(10);
+    doc.text(outletLabel, 40, 54);
+    doc.text(dateRangeLabel, 40, 69);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 40, 84);
+
+    const head = [[
+      'Session Date',
+      'Status',
+      'Opening Balance',
+      'Closing Balance',
+      'Difference',
+      'Total Sales',
+      'Sales Amount',
+      'Opened At',
+      'Closed At',
+    ]];
+
+    const body = transactionRows.map((row) => [
+      row.session_date || '',
+      row.status || '',
+      Number(row.opening_balance || 0).toFixed(2),
+      row.closing_balance !== null ? Number(row.closing_balance || 0).toFixed(2) : '-',
+      row.difference !== null ? Number(row.difference || 0).toFixed(2) : '-',
+      String(Number(row.total_sales || 0)),
+      Number(row.total_sales_amount || 0).toFixed(2),
+      row.opened_at ? new Date(row.opened_at).toLocaleString() : '-',
+      row.closed_at ? new Date(row.closed_at).toLocaleString() : '-',
+    ]);
+
+    autoTable(doc, {
+      head,
+      body,
+      startY: 98,
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [16, 185, 129], textColor: 255 },
+      alternateRowStyles: { fillColor: [240, 253, 250] },
+      margin: { left: 24, right: 24 },
+    });
+
+    doc.save(`cash-drawer-transactions-${fromDate}-to-${toDate}.pdf`);
+  };
+
   const handleOpenCashier = async () => {
     if (!token || !outletId) return;
 
@@ -396,84 +453,98 @@ export default function OutletCashDrawerPage() {
     }
   };
 
+  const cardInputClass = 'w-full rounded-xl border border-emerald-200 bg-gradient-to-b from-white to-emerald-50/30 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition placeholder:text-slate-400 focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100';
+  const cardLabelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500';
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_25%),radial-gradient(circle_at_top_right,_rgba(6,182,212,0.14),_transparent_28%),linear-gradient(180deg,_#f0fdf9_0%,_#ecfeff_45%,_#f0fdfa_100%)]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 relative overflow-hidden">
+    <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_24%),radial-gradient(circle_at_top_right,_rgba(6,182,212,0.14),_transparent_28%),linear-gradient(180deg,_#f0fdf9_0%,_#ecfeff_45%,_#f0fdfa_100%)]">
       <div className="absolute inset-0 opacity-30 pointer-events-none">
         <div className="absolute top-20 left-20 w-72 h-72 bg-emerald-200 rounded-full mix-blend-multiply filter blur-xl animate-pulse"></div>
         <div className="absolute top-40 right-20 w-72 h-72 bg-teal-200 rounded-full mix-blend-multiply filter blur-xl animate-pulse"></div>
       </div>
 
-      <main className="relative z-10 max-w-4xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-6">
-        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">Cashier Open / Close</h1>
-              <p className="text-sm text-gray-600">{outletName} ({outletCode})</p>
+      <main className="relative z-10 mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+        <section className="overflow-hidden rounded-[30px] border border-white/70 bg-white/80 shadow-[0_26px_90px_-45px_rgba(13,148,136,0.48)] backdrop-blur-xl">
+          <div className="grid gap-7 px-5 py-6 sm:px-6 lg:grid-cols-[1.35fr_1fr] lg:px-8">
+            <div className="space-y-4">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-1.5 text-sm font-semibold text-emerald-700">
+                <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+                Cash drawer control center
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Cashier Open / Close</h1>
+                <p className="mt-2 text-sm text-slate-600 sm:text-base">
+                  {outletName} ({outletCode})
+                </p>
+                <p className="mt-2 max-w-2xl text-sm text-slate-500">
+                  Manage opening and closing balances, track daily differences, and monitor transaction sessions from one premium workspace.
+                </p>
+              </div>
+              <div>
+                <Link
+                  href={getPathWithCode('/outlet-pos')}
+                  className="inline-flex rounded-full bg-gradient-to-r from-rose-500 to-pink-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-rose-200/60 transition hover:from-rose-600 hover:to-pink-600"
+                >
+                  Back To Dashboard
+                </Link>
+              </div>
             </div>
-            <Link
-              href={getPathWithCode('/outlet-pos')}
-              className="px-4 py-2 bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-md text-sm font-medium hover:from-rose-600 hover:to-pink-600"
-            >
-              Back To Dashboard
-            </Link>
-          </div>
-        </section>
 
-        {message && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{message}</div>
-        )}
-
-        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
-              <div className="text-xs text-gray-500">Current Drawer Balance</div>
-              <div className="text-3xl font-bold text-emerald-700">{Number(cashDrawer?.balance || 0).toFixed(2)}</div>
-            </div>
-            <div className="rounded-xl border border-teal-100 bg-teal-50/60 p-4">
-              <div className="text-xs text-gray-500">Session Date</div>
-              <div className="text-sm font-semibold text-gray-900 mt-1">{session?.session_date || '-'}</div>
-            </div>
-            <div className="rounded-xl border border-cyan-100 bg-cyan-50/60 p-4">
-              <div className="text-xs text-gray-500">Cashier Status</div>
-              <div className={`text-sm font-semibold mt-1 ${session?.is_open ? 'text-emerald-700' : session?.is_closed ? 'text-blue-700' : 'text-amber-700'}`}>
-                {session?.is_open ? 'OPEN' : session?.is_closed ? 'CLOSED' : 'NOT OPEN'}
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="rounded-3xl border border-emerald-200/70 bg-gradient-to-br from-emerald-500 to-teal-500 p-5 text-white shadow-lg shadow-emerald-300/45">
+                <p className="text-xs uppercase tracking-[0.24em] text-white/80">Drawer Balance</p>
+                <p className="mt-2 text-3xl font-bold">{Number(cashDrawer?.balance || 0).toFixed(2)}</p>
+              </div>
+              <div className="rounded-3xl border border-cyan-200 bg-white p-5 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.24em] text-cyan-600">Session Date</p>
+                <p className="mt-2 text-base font-semibold text-slate-900">{session?.session_date || '-'}</p>
+              </div>
+              <div className="rounded-3xl border border-blue-200 bg-white p-5 shadow-sm sm:col-span-3 lg:col-span-1">
+                <p className="text-xs uppercase tracking-[0.24em] text-blue-600">Status</p>
+                <p className={`mt-2 text-base font-semibold ${session?.is_open ? 'text-emerald-700' : session?.is_closed ? 'text-blue-700' : 'text-amber-700'}`}>
+                  {session?.is_open ? 'OPEN' : session?.is_closed ? 'CLOSED' : 'NOT OPEN'}
+                </p>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5 space-y-5">
+        {message && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{message}</div>
+        )}
+
+        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg p-5 shadow-[0_18px_65px_-35px_rgba(13,148,136,0.45)] space-y-5">
           {!session?.is_open ? (
             <>
-              <h2 className="text-lg font-semibold text-gray-900">Open Cashier</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Open Cashier</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Opening Balance</label>
+                  <label className={cardLabelClass}>Opening Balance</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={openingBalance}
                     onChange={(e) => setOpeningBalance(e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-black"
+                    className={cardInputClass}
                     placeholder="0.00"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Opening Note</label>
+                  <label className={cardLabelClass}>Opening Note</label>
                   <input
                     type="text"
                     value={openingNote}
                     onChange={(e) => setOpeningNote(e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-black"
+                    className={cardInputClass}
                     placeholder="Morning opening note"
                   />
                 </div>
@@ -483,7 +554,7 @@ export default function OutletCashDrawerPage() {
                   type="button"
                   onClick={handleOpenCashier}
                   disabled={saving || session?.is_closed}
-                  className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-md text-sm font-medium hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50"
+                  className="rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : session?.is_closed ? 'Already Closed Today' : 'Open Cashier'}
                 </button>
@@ -491,27 +562,27 @@ export default function OutletCashDrawerPage() {
             </>
           ) : (
             <>
-              <h2 className="text-lg font-semibold text-gray-900">Close Cashier</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Close Cashier</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Closing Balance</label>
+                  <label className={cardLabelClass}>Closing Balance</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={closingBalance}
                     onChange={(e) => setClosingBalance(e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-black"
+                    className={cardInputClass}
                     placeholder="0.00"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Closing Note</label>
+                  <label className={cardLabelClass}>Closing Note</label>
                   <input
                     type="text"
                     value={closingNote}
                     onChange={(e) => setClosingNote(e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-black"
+                    className={cardInputClass}
                     placeholder="End-of-day closing note"
                   />
                 </div>
@@ -521,7 +592,7 @@ export default function OutletCashDrawerPage() {
                   type="button"
                   onClick={handleCloseCashier}
                   disabled={saving}
-                  className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-md text-sm font-medium hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+                  className="rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : 'Close Cashier'}
                 </button>
@@ -530,82 +601,91 @@ export default function OutletCashDrawerPage() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Daily Balance Sheet</h2>
+        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg p-5 shadow-[0_18px_65px_-35px_rgba(13,148,136,0.45)]">
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">Daily Balance Sheet</h2>
           <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Sheet Date</label>
+              <label className={cardLabelClass}>Sheet Date</label>
               <input
                 type="date"
                 value={sheetDate}
                 onChange={(e) => setSheetDate(e.target.value)}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm text-black"
+                className={cardInputClass}
               />
             </div>
             <button
               type="button"
               onClick={handleDownloadBalanceSheet}
-              className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-md text-sm font-medium hover:from-indigo-700 hover:to-blue-700"
+              className="rounded-full bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-indigo-700 hover:to-blue-700"
             >
               Download Balance Sheet
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <div className="text-xs text-gray-500">Opening Amount</div>
-              <div className="text-xl font-bold text-gray-900">{Number(sheet?.opening_balance || 0).toFixed(2)}</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Opening Amount</div>
+              <div className="text-xl font-bold text-slate-900">{Number(sheet?.opening_balance || 0).toFixed(2)}</div>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <div className="text-xs text-gray-500">Closing Amount</div>
-              <div className="text-xl font-bold text-gray-900">{Number(sheet?.closing_balance || 0).toFixed(2)}</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Closing Amount</div>
+              <div className="text-xl font-bold text-slate-900">{Number(sheet?.closing_balance || 0).toFixed(2)}</div>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <div className="text-xs text-gray-500">Difference</div>
-              <div className="text-xl font-bold text-gray-900">{Number(sheet?.balance_difference || 0).toFixed(2)}</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Difference</div>
+              <div className="text-xl font-bold text-slate-900">{Number(sheet?.balance_difference || 0).toFixed(2)}</div>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <div className="text-xs text-gray-500">Sales Count</div>
-              <div className="text-xl font-bold text-gray-900">{Number(sheet?.total_sales || 0)}</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Sales Count</div>
+              <div className="text-xl font-bold text-slate-900">{Number(sheet?.total_sales || 0)}</div>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <div className="text-xs text-gray-500">Sales Amount</div>
-              <div className="text-xl font-bold text-gray-900">{Number(sheet?.total_sales_amount || 0).toFixed(2)}</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Sales Amount</div>
+              <div className="text-xl font-bold text-slate-900">{Number(sheet?.total_sales_amount || 0).toFixed(2)}</div>
             </div>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
+        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg p-5 shadow-[0_18px_65px_-35px_rgba(13,148,136,0.45)]">
           <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Transaction Records</h2>
-              <p className="text-sm text-gray-600">Open/close sessions and sales summary within date range.</p>
+              <h2 className="text-lg font-semibold text-slate-900">Transaction Records</h2>
+              <p className="text-sm text-slate-600">Open/close sessions and sales summary within date range.</p>
             </div>
-            <button
-              type="button"
-              onClick={handleDownloadTransactions}
-              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-md text-sm font-medium hover:from-emerald-700 hover:to-teal-700"
-            >
-              Download Transaction Records
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadTransactions}
+                className="rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-emerald-700 hover:to-teal-700"
+              >
+                Download CSV
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadTransactionsPdf}
+                className="rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700"
+              >
+                Download PDF
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
+              <label className={cardLabelClass}>From Date</label>
               <input
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-black"
+                className={cardInputClass}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
+              <label className={cardLabelClass}>To Date</label>
               <input
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-black"
+                className={cardInputClass}
               />
             </div>
             <div className="flex items-end">
@@ -613,41 +693,41 @@ export default function OutletCashDrawerPage() {
                 type="button"
                 onClick={handleLoadTransactions}
                 disabled={transactionLoading}
-                className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-md text-sm font-medium hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+                className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
               >
                 {transactionLoading ? 'Loading...' : 'Load Records'}
               </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-md border border-gray-200">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-100/80">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Opening</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Closing</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Diff</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sales</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sales Amount</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Date</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Status</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Opening</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Closing</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Diff</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Sales</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Sales Amount</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
+              <tbody className="bg-white divide-y divide-slate-100">
                 {transactionRows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-gray-500">No transaction records found.</td>
+                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-500">No transaction records found.</td>
                   </tr>
                 ) : (
                   transactionRows.map((row) => (
-                    <tr key={row.session_date}>
-                      <td className="px-4 py-2 text-sm text-gray-700">{row.session_date}</td>
-                      <td className="px-4 py-2 text-sm text-gray-700 uppercase">{row.status || '-'}</td>
-                      <td className="px-4 py-2 text-sm text-right text-gray-700">{Number(row.opening_balance || 0).toFixed(2)}</td>
-                      <td className="px-4 py-2 text-sm text-right text-gray-700">{row.closing_balance !== null ? Number(row.closing_balance || 0).toFixed(2) : '-'}</td>
-                      <td className="px-4 py-2 text-sm text-right text-gray-700">{row.difference !== null ? Number(row.difference || 0).toFixed(2) : '-'}</td>
-                      <td className="px-4 py-2 text-sm text-right text-gray-700">{Number(row.total_sales || 0)}</td>
-                      <td className="px-4 py-2 text-sm text-right text-gray-900 font-semibold">{Number(row.total_sales_amount || 0).toFixed(2)}</td>
+                    <tr key={row.session_date} className="transition hover:bg-emerald-50/35">
+                      <td className="px-4 py-2.5 text-sm text-slate-700">{row.session_date}</td>
+                      <td className="px-4 py-2.5 text-sm uppercase text-slate-700">{row.status || '-'}</td>
+                      <td className="px-4 py-2.5 text-sm text-right text-slate-700">{Number(row.opening_balance || 0).toFixed(2)}</td>
+                      <td className="px-4 py-2.5 text-sm text-right text-slate-700">{row.closing_balance !== null ? Number(row.closing_balance || 0).toFixed(2) : '-'}</td>
+                      <td className="px-4 py-2.5 text-sm text-right text-slate-700">{row.difference !== null ? Number(row.difference || 0).toFixed(2) : '-'}</td>
+                      <td className="px-4 py-2.5 text-sm text-right text-slate-700">{Number(row.total_sales || 0)}</td>
+                      <td className="px-4 py-2.5 text-sm text-right font-semibold text-slate-900">{Number(row.total_sales_amount || 0).toFixed(2)}</td>
                     </tr>
                   ))
                 )}

@@ -64,6 +64,12 @@ export default function OutletManagementPage() {
   const [salesTotals, setSalesTotals] = useState({ total_sales: 0, total_quantity: 0, total_amount: 0 });
   const [salesRecords, setSalesRecords] = useState<OutletSaleRecord[]>([]);
   const [itemWiseSales, setItemWiseSales] = useState<OutletSalesItemWise[]>([]);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [noticeTitle, setNoticeTitle] = useState('Notice');
+  const [noticeMessage, setNoticeMessage] = useState('');
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Outlet | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [origin, setOrigin] = useState('');
   const router = useRouter();
 
@@ -140,6 +146,12 @@ export default function OutletManagementPage() {
     setShowModal(true);
   };
 
+  const showNotice = (title: string, message: string) => {
+    setNoticeTitle(title);
+    setNoticeMessage(message);
+    setNoticeOpen(true);
+  };
+
   const openEdit = (outlet: Outlet) => {
     setEditingOutlet(outlet);
     setFormData({
@@ -181,7 +193,10 @@ export default function OutletManagementPage() {
 
         const createdOutlet = createRes?.data?.data;
         const posLink = `${window.location.origin}/outlet-pos?outlet_code=${encodeURIComponent(createdOutlet?.code || formData.code)}`;
-        alert(`Outlet created successfully. POS Link: ${posLink}\nOutlet POS Login Email: ${formData.outlet_user_email}`);
+        showNotice(
+          'Outlet Created Successfully',
+          `POS Link: ${posLink}\nOutlet POS Login Email: ${formData.outlet_user_email}`
+        );
       }
 
       setShowModal(false);
@@ -189,25 +204,35 @@ export default function OutletManagementPage() {
       fetchOutlets();
     } catch (error: any) {
       console.error('Error saving outlet:', error);
-      alert(error?.response?.data?.message || 'Failed to save outlet');
+      showNotice('Save Failed', error?.response?.data?.message || 'Failed to save outlet');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (outlet: Outlet) => {
-    if (!confirm(`Delete outlet ${outlet.name}?`)) {
+  const handleDelete = (outlet: Outlet) => {
+    setDeleteTarget(outlet);
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) {
       return;
     }
 
     try {
-      await axios.delete(`http://localhost:8000/api/outlets/${outlet.id}`, {
+      setDeleting(true);
+      await axios.delete(`http://localhost:8000/api/outlets/${deleteTarget.id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      setDeleteConfirmOpen(false);
+      setDeleteTarget(null);
       fetchOutlets();
     } catch (error: any) {
       console.error('Error deleting outlet:', error);
-      alert(error?.response?.data?.message || 'Failed to delete outlet');
+      showNotice('Delete Failed', error?.response?.data?.message || 'Failed to delete outlet');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -255,6 +280,12 @@ export default function OutletManagementPage() {
     }
   };
 
+  const activeOutlets = outlets.filter((outlet) => outlet.status === 'active').length;
+  const inactiveOutlets = outlets.length - activeOutlets;
+  const outletsWithUsers = outlets.filter((outlet) => outlet.user?.email).length;
+  const fieldClass =
+    'w-full rounded-2xl border border-violet-200/70 bg-white/90 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition duration-200 placeholder:text-slate-400 focus:border-violet-500 focus:ring-4 focus:ring-violet-200/70';
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -264,22 +295,22 @@ export default function OutletManagementPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm border-b border-gray-200">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.16),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.14),_transparent_24%),linear-gradient(180deg,_#f8f7ff_0%,_#f5f7fb_42%,_#eef2ff_100%)]">
+      <nav className="border-b border-white/50 bg-white/70 shadow-sm backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-gradient-to-r from-violet-500 to-purple-500 rounded-lg flex items-center justify-center text-white text-lg">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 via-purple-500 to-indigo-500 text-lg text-white shadow-lg shadow-violet-300/50">
                 🏪
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-gray-900">Outlets Management</h1>
-                <p className="text-xs text-gray-500">Create, edit and delete outlets</p>
+                <h1 className="text-lg font-semibold text-slate-900">Outlets Management</h1>
+                <p className="text-xs text-slate-500">Create stores, assign POS access and manage outlet operations</p>
               </div>
             </div>
             <button
               onClick={() => router.push('/dashboard')}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-full border border-slate-200 bg-white/90 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
             >
               Back to Dashboard
             </button>
@@ -288,43 +319,81 @@ export default function OutletManagementPage() {
       </nav>
 
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        <div className="mb-8 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Outlets Management</h1>
-            <p className="mt-2 text-gray-600">Create, edit and delete outlet records.</p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => router.back()}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Back
-            </button>
-            <button
-              onClick={() => router.push('/dashboard/outlets')}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Outlets Home
-            </button>
-            <button
-              onClick={() => router.push('/dashboard/outlets/sales')}
-              className="px-4 py-2 border border-indigo-300 rounded-md text-sm font-medium text-indigo-700 hover:bg-indigo-50"
-            >
-              Outlet Sales Tracking
-            </button>
-            <button
-              onClick={openCreate}
-              className="px-4 py-2 bg-violet-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-violet-700"
-            >
-              Add Outlet
-            </button>
+        <div className="mb-8 overflow-hidden rounded-[32px] border border-white/60 bg-white/70 shadow-[0_24px_80px_-40px_rgba(76,29,149,0.45)] backdrop-blur-xl">
+          <div className="grid gap-8 px-6 py-7 lg:grid-cols-[1.4fr_0.9fr] lg:px-8">
+            <div className="space-y-5">
+              <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-4 py-1.5 text-sm font-medium text-violet-700">
+                <span className="h-2 w-2 rounded-full bg-violet-500"></span>
+                Retail control center
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Outlets Management</h1>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
+                  Organize outlet locations, assign store operators, and keep POS access polished and ready for day-to-day retail operations.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => router.back()}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={() => router.push('/dashboard/outlets')}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                >
+                  Outlets Home
+                </button>
+                <button
+                  onClick={() => router.push('/dashboard/outlets/sales')}
+                  className="rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100"
+                >
+                  Outlet Sales Tracking
+                </button>
+                <button
+                  onClick={openCreate}
+                  className="rounded-full bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-300/50 transition hover:scale-[1.02] hover:shadow-xl hover:shadow-violet-300/60"
+                >
+                  Add Outlet
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="rounded-3xl border border-violet-200/70 bg-gradient-to-br from-violet-500 to-purple-600 p-5 text-white shadow-lg shadow-violet-300/40">
+                <p className="text-xs uppercase tracking-[0.24em] text-white/70">Total Outlets</p>
+                <p className="mt-3 text-3xl font-bold">{outlets.length}</p>
+                <p className="mt-2 text-sm text-white/80">All registered retail locations</p>
+              </div>
+              <div className="rounded-3xl border border-emerald-200/80 bg-white p-5 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.24em] text-emerald-600">Active Stores</p>
+                <p className="mt-3 text-3xl font-bold text-slate-900">{activeOutlets}</p>
+                <p className="mt-2 text-sm text-slate-500">{inactiveOutlets} inactive outlets currently paused</p>
+              </div>
+              <div className="rounded-3xl border border-sky-200/80 bg-white p-5 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.24em] text-sky-600">POS Ready</p>
+                <p className="mt-3 text-3xl font-bold text-slate-900">{outletsWithUsers}</p>
+                <p className="mt-2 text-sm text-slate-500">Outlets with linked operator accounts</p>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+        <div className="overflow-hidden rounded-[28px] border border-white/70 bg-white/75 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.4)] backdrop-blur-xl">
+          <div className="flex flex-col gap-4 border-b border-slate-200/80 bg-gradient-to-r from-slate-900 via-violet-900 to-indigo-900 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-white">Outlet Directory</h2>
+              <p className="mt-1 text-sm text-white/70">Review outlet identities, POS access and operation status in one place.</p>
+            </div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm text-white/80 backdrop-blur-md">
+              <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
+              {activeOutlets} active of {outlets.length} outlets
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+              <thead className="bg-slate-50/90">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
@@ -365,9 +434,9 @@ export default function OutletManagementPage() {
                               const posLink = `${origin}/outlet-pos?outlet_code=${encodeURIComponent(outlet.code)}`;
                               try {
                                 await navigator.clipboard.writeText(posLink);
-                                alert(`POS link copied for ${outlet.name}`);
+                                showNotice('POS Link Copied', `POS link copied for ${outlet.name}`);
                               } catch {
-                                alert(posLink);
+                                showNotice('Copy Failed', `Please copy this POS link manually:\n${posLink}`);
                               }
                             }}
                             className="px-2 py-1 text-xs rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200"
@@ -386,6 +455,12 @@ export default function OutletManagementPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => router.push(`/dashboard/outlets/account/${outlet.id}`)}
+                            className="text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 px-3 py-1 rounded-md text-sm font-medium"
+                          >
+                            Outlet Account
+                          </button>
                           <button
                             onClick={() => router.push(`/dashboard/outlets/store/${outlet.id}`)}
                             className="text-violet-700 hover:text-violet-900 bg-violet-50 hover:bg-violet-100 px-3 py-1 rounded-md text-sm font-medium"
@@ -422,143 +497,287 @@ export default function OutletManagementPage() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">
-              {editingOutlet ? 'Edit Outlet' : 'Create Outlet'}
-            </h3>
-
-            <form onSubmit={handleSave} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                  <input
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                    required
-                  />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-md">
+          <div className="relative w-full max-w-4xl overflow-hidden rounded-[32px] border border-white/20 bg-white shadow-[0_30px_120px_-35px_rgba(67,56,202,0.55)]">
+            <div className="absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.32),_transparent_48%),linear-gradient(135deg,_rgba(76,29,149,1)_0%,_rgba(109,40,217,0.94)_45%,_rgba(79,70,229,0.9)_100%)]"></div>
+            <div className="relative flex max-h-[90vh] flex-col overflow-hidden">
+              <div className="flex items-start justify-between gap-4 px-6 pb-6 pt-6 sm:px-8 sm:pb-7 sm:pt-8">
+                <div className="max-w-2xl text-white">
+                  <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-white/20 bg-white/10 text-2xl shadow-lg shadow-violet-950/20 backdrop-blur-md">
+                    {editingOutlet ? '✦' : '🏪'}
+                  </div>
+                  <h3 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                    {editingOutlet ? 'Refine Outlet Profile' : 'Create Outlet Experience'}
+                  </h3>
+                  <p className="mt-2 max-w-xl text-sm leading-6 text-white/80 sm:text-base">
+                    {editingOutlet
+                      ? 'Update store identity, contact points and activation settings with a cleaner control surface.'
+                      : 'Set up a polished outlet profile, operator access and POS-ready credentials from one premium workspace.'}
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Code</label>
-                  <input
-                    type="text"
-                    value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Manager Name</label>
-                  <input
-                    type="text"
-                    value={formData.manager_name}
-                    onChange={(e) => setFormData({ ...formData, manager_name: e.target.value })}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                  <input
-                    type="text"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
-
-                {!editingOutlet && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Outlet User Name</label>
-                      <input
-                        type="text"
-                        value={formData.outlet_user_name}
-                        onChange={(e) => setFormData({ ...formData, outlet_user_name: e.target.value })}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Outlet User Email</label>
-                      <input
-                        type="email"
-                        value={formData.outlet_user_email}
-                        onChange={(e) => setFormData({ ...formData, outlet_user_email: e.target.value })}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                        required
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {!editingOutlet && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Outlet User Password</label>
-                  <input
-                    type="password"
-                    value={formData.outlet_user_password}
-                    onChange={(e) => setFormData({ ...formData, outlet_user_password: e.target.value })}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                    minLength={8}
-                    required
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                <textarea
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm text-black"
-                  rows={3}
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => {
                     setShowModal(false);
                     resetForm();
                   }}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/20 bg-white/10 text-xl text-white transition hover:bg-white/20"
+                >
+                  ×
+                </button>
+              </div>
+
+              <form onSubmit={handleSave} className="relative overflow-y-auto px-6 pb-6 sm:px-8 sm:pb-8">
+                <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+                  <div className="space-y-6">
+                    <section className="rounded-[28px] border border-violet-100 bg-white p-5 shadow-sm">
+                      <div className="mb-5 flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.26em] text-violet-500">Outlet Profile</p>
+                          <h4 className="mt-2 text-lg font-semibold text-slate-900">Store identity</h4>
+                          <p className="mt-1 text-sm text-slate-500">Define how this outlet appears across reporting, operations and retail workflows.</p>
+                        </div>
+                        <div className="rounded-2xl bg-violet-50 px-3 py-2 text-xs font-medium text-violet-700">Core details</div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Outlet Name</label>
+                          <input
+                            type="text"
+                            value={formData.name}
+                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                            className={fieldClass}
+                            placeholder="Downtown Retail Hub"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Outlet Code</label>
+                          <input
+                            type="text"
+                            value={formData.code}
+                            onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                            className={fieldClass}
+                            placeholder="OUT001"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Manager Name</label>
+                          <input
+                            type="text"
+                            value={formData.manager_name}
+                            onChange={(e) => setFormData({ ...formData, manager_name: e.target.value })}
+                            className={fieldClass}
+                            placeholder="Store manager name"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Status</label>
+                          <select
+                            value={formData.status}
+                            onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
+                            className={fieldClass}
+                          >
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                          </select>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="mb-5">
+                        <p className="text-xs font-semibold uppercase tracking-[0.26em] text-sky-500">Operations Contact</p>
+                        <h4 className="mt-2 text-lg font-semibold text-slate-900">Communication details</h4>
+                        <p className="mt-1 text-sm text-slate-500">Keep each outlet reachable for support, sales coordination and operational follow-up.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Phone</label>
+                          <input
+                            type="text"
+                            value={formData.phone}
+                            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                            className={fieldClass}
+                            placeholder="077 123 4567"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Email</label>
+                          <input
+                            type="email"
+                            value={formData.email}
+                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                            className={fieldClass}
+                            placeholder="outlet@company.com"
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Address</label>
+                          <textarea
+                            value={formData.address}
+                            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                            className={`${fieldClass} min-h-[112px] resize-none`}
+                            placeholder="Street, city, landmark, and other delivery or branch details"
+                            rows={4}
+                          />
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="space-y-6">
+                    <section className="overflow-hidden rounded-[28px] border border-violet-100 bg-white shadow-sm">
+                      <div className="border-b border-violet-100 bg-gradient-to-br from-violet-50 via-white to-indigo-50 px-5 py-5">
+                        <p className="text-xs font-semibold uppercase tracking-[0.26em] text-violet-500">POS Access</p>
+                        <h4 className="mt-2 text-lg font-semibold text-slate-900">Outlet operator credentials</h4>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {editingOutlet
+                            ? 'Current linked user details are shown here for reference.'
+                            : 'Create a dedicated outlet login for POS usage right from this modal.'}
+                        </p>
+                      </div>
+
+                      <div className="space-y-4 p-5">
+                        {!editingOutlet ? (
+                          <>
+                            <div>
+                              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Outlet User Name</label>
+                              <input
+                                type="text"
+                                value={formData.outlet_user_name}
+                                onChange={(e) => setFormData({ ...formData, outlet_user_name: e.target.value })}
+                                className={fieldClass}
+                                placeholder="Outlet operator name"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Outlet User Email</label>
+                              <input
+                                type="email"
+                                value={formData.outlet_user_email}
+                                onChange={(e) => setFormData({ ...formData, outlet_user_email: e.target.value })}
+                                className={fieldClass}
+                                placeholder="pos.user@company.com"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Outlet User Password</label>
+                              <input
+                                type="password"
+                                value={formData.outlet_user_password}
+                                onChange={(e) => setFormData({ ...formData, outlet_user_password: e.target.value })}
+                                className={fieldClass}
+                                minLength={8}
+                                placeholder="Minimum 8 characters"
+                                required
+                              />
+                              <p className="mt-2 text-xs text-slate-500">Use a strong password for secure POS access and cashier sessions.</p>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="rounded-3xl border border-dashed border-violet-200 bg-violet-50/60 p-4 text-sm text-slate-600">
+                            <p className="font-medium text-slate-900">Outlet user account</p>
+                            <p className="mt-2">Name: <span className="font-medium text-slate-800">{formData.outlet_user_name || 'Not linked'}</span></p>
+                            <p className="mt-1">Email: <span className="font-medium text-slate-800">{formData.outlet_user_email || 'Not linked'}</span></p>
+                            <p className="mt-3 text-xs text-slate-500">User credential creation is available during new outlet onboarding.</p>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+
+                    <section className="rounded-[28px] border border-slate-200 bg-slate-950 p-5 text-white shadow-lg shadow-slate-900/10">
+                      <p className="text-xs font-semibold uppercase tracking-[0.26em] text-violet-300">Launch Notes</p>
+                      <h4 className="mt-2 text-lg font-semibold">Ready for store activation</h4>
+                      <ul className="mt-4 space-y-3 text-sm text-white/75">
+                        <li>Each outlet code can be used to open the dedicated POS session URL.</li>
+                        <li>Keep contact and manager details complete for smoother support coordination.</li>
+                        <li>Use active status only when the store is prepared for transactions.</li>
+                      </ul>
+                    </section>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-col gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowModal(false);
+                      resetForm();
+                    }}
+                    className="rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="rounded-full bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-300/50 transition hover:scale-[1.01] hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {saving ? 'Saving...' : editingOutlet ? 'Update Outlet' : 'Create Outlet'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noticeOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-white/20 bg-white shadow-[0_28px_90px_-40px_rgba(67,56,202,0.55)]">
+            <div className="bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-4 text-white">
+              <h3 className="text-lg font-semibold">{noticeTitle}</h3>
+            </div>
+            <div className="px-6 py-5">
+              <p className="whitespace-pre-line text-sm leading-6 text-slate-600">{noticeMessage}</p>
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => setNoticeOpen(false)}
+                  className="rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirmOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-white/20 bg-white shadow-[0_28px_90px_-40px_rgba(239,68,68,0.5)]">
+            <div className="bg-gradient-to-r from-red-600 to-orange-500 px-6 py-4 text-white">
+              <h3 className="text-lg font-semibold">Delete Outlet</h3>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm leading-6 text-slate-600">
+                Are you sure you want to delete outlet <span className="font-semibold text-slate-900">{deleteTarget?.name}</span>? This action cannot be undone.
+              </p>
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setDeleteConfirmOpen(false);
+                    setDeleteTarget(null);
+                  }}
+                  className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   Cancel
                 </button>
                 <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-4 py-2 bg-violet-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                  onClick={confirmDelete}
+                  disabled={deleting}
+                  className="rounded-full border border-transparent bg-gradient-to-r from-red-600 to-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:from-red-700 hover:to-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {saving ? 'Saving...' : editingOutlet ? 'Update Outlet' : 'Create Outlet'}
+                  {deleting ? 'Deleting...' : 'Delete'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

@@ -32,14 +32,29 @@ type CashierSessionStatus = {
   session_date?: string;
 };
 
+type DailyBalanceSheet = {
+  session_date: string;
+  opening_balance: number;
+  closing_balance: number;
+  balance_difference: number;
+  total_sales: number;
+  total_sales_amount: number;
+};
+
 export default function OutletPosDashboardPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [outletName, setOutletName] = useState('');
   const [outletCode, setOutletCode] = useState('');
+  const [outletId, setOutletId] = useState<number | null>(null);
   const [stocks, setStocks] = useState<StockLine[]>([]);
   const [sales, setSales] = useState<SaleRow[]>([]);
+  const [latestSalesPage, setLatestSalesPage] = useState(1);
+  const [latestSalesPageSize, setLatestSalesPageSize] = useState(8);
   const [cashierSession, setCashierSession] = useState<CashierSessionStatus | null>(null);
+  const [balanceSheetDate, setBalanceSheetDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dailyBalanceSheet, setDailyBalanceSheet] = useState<DailyBalanceSheet | null>(null);
+  const [balanceSheetLoading, setBalanceSheetLoading] = useState(false);
   const [message, setMessage] = useState('');
 
   const router = useRouter();
@@ -96,6 +111,8 @@ export default function OutletPosDashboardPage() {
 
     setOutletName(outlet.name || 'Outlet');
     setOutletCode(outlet.code || '-');
+    const currentOutletId = Number(outlet.id) || null;
+    setOutletId(currentOutletId);
     setStocks((payload?.stocks || []).filter((line: StockLine) => Number(line.available_qty) > 0));
 
     const sessionRes = await axios.get(`${API_URL}/api/outlet-pos/cash-drawer-status`, {
@@ -130,7 +147,54 @@ export default function OutletPosDashboardPage() {
     }
 
     setSales(salesRes.data?.data?.data || []);
+
+    if (currentOutletId) {
+      await loadDailyBalanceSheet(authToken, currentOutletId, balanceSheetDate);
+    }
+
     return true;
+  };
+
+  const loadDailyBalanceSheet = async (authToken: string, currentOutletId?: number | null, sessionDate?: string) => {
+    const targetOutletId = currentOutletId || outletId;
+    if (!targetOutletId) return;
+
+    try {
+      setBalanceSheetLoading(true);
+      const response = await axios.get(`${API_URL}/api/outlet-pos/cash-drawer-balance-sheet`, {
+        headers: authHeaders(authToken),
+        params: {
+          outlet_id: targetOutletId,
+          session_date: sessionDate || balanceSheetDate,
+        },
+        validateStatus: () => true,
+      });
+
+      if (response.status === 401) {
+        redirectToLoginWithNext();
+        return;
+      }
+
+      if (response.status >= 400) {
+        setDailyBalanceSheet(null);
+        return;
+      }
+
+      const data = response.data?.data;
+      setDailyBalanceSheet({
+        session_date: data?.session_date || (sessionDate || balanceSheetDate),
+        opening_balance: Number(data?.opening_balance || 0),
+        closing_balance: Number(data?.closing_balance || 0),
+        balance_difference: Number(data?.balance_difference || 0),
+        total_sales: Number(data?.total_sales || 0),
+        total_sales_amount: Number(data?.total_sales_amount || 0),
+      });
+    } catch (error) {
+      console.error('Error loading daily balance sheet:', error);
+      setDailyBalanceSheet(null);
+    } finally {
+      setBalanceSheetLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -217,6 +281,56 @@ export default function OutletPosDashboardPage() {
       widthPct: Math.max(10, Math.round((Number(line.available_qty || 0) / max) * 100)),
     }));
   }, [stocks]);
+
+  const dailyReportSummary = useMemo(() => {
+    if (!dailyBalanceSheet) {
+      return {
+        startBalance: 0,
+        credit: 0,
+        debit: 0,
+        expectedBalance: 0,
+        endBalance: 0,
+        difference: 0,
+      };
+    }
+
+    const startBalance = Number(dailyBalanceSheet.opening_balance || 0);
+    const endBalance = Number(dailyBalanceSheet.closing_balance || 0);
+    const movement = endBalance - startBalance;
+    const credit = movement > 0 ? movement : 0;
+    const debit = movement < 0 ? Math.abs(movement) : 0;
+    const expectedBalance = startBalance + credit - debit;
+    const difference = Number(dailyBalanceSheet.balance_difference || 0);
+
+    return {
+      startBalance,
+      credit,
+      debit,
+      expectedBalance,
+      endBalance,
+      difference,
+    };
+  }, [dailyBalanceSheet]);
+
+  const latestSalesTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(sales.length / latestSalesPageSize)),
+    [sales.length, latestSalesPageSize]
+  );
+
+  const safeLatestSalesPage = Math.min(latestSalesPage, latestSalesTotalPages);
+  const latestSalesStartIndex = (safeLatestSalesPage - 1) * latestSalesPageSize;
+  const latestSalesEndIndex = Math.min(latestSalesStartIndex + latestSalesPageSize, sales.length);
+
+  const paginatedLatestSales = useMemo(
+    () => sales.slice(latestSalesStartIndex, latestSalesEndIndex),
+    [sales, latestSalesStartIndex, latestSalesEndIndex]
+  );
+
+  useEffect(() => {
+    if (latestSalesPage > latestSalesTotalPages) {
+      setLatestSalesPage(latestSalesTotalPages);
+    }
+  }, [latestSalesPage, latestSalesTotalPages]);
 
   if (loading) {
     return (
@@ -353,6 +467,61 @@ export default function OutletPosDashboardPage() {
           </div>
         </section>
 
+        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Daily Balance Sheet</h3>
+              <p className="text-sm text-gray-600">Credit = received cash (increase). Debit = transfer cash (decrease) from the cash drawer balance.</p>
+            </div>
+            <div className="flex items-end gap-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Session Date</label>
+                <input
+                  type="date"
+                  value={balanceSheetDate}
+                  onChange={(e) => setBalanceSheetDate(e.target.value)}
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm text-black"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => loadDailyBalanceSheet(token, outletId, balanceSheetDate)}
+                disabled={balanceSheetLoading || !outletId}
+                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-md text-sm font-medium hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50"
+              >
+                {balanceSheetLoading ? 'Loading...' : 'Get Balance Sheet'}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+              <div className="text-xs text-gray-500">Start Balance</div>
+              <div className="text-lg font-bold text-emerald-700">{dailyReportSummary.startBalance.toFixed(2)}</div>
+            </div>
+            <div className="rounded-xl border border-cyan-100 bg-cyan-50/60 p-4">
+              <div className="text-xs text-gray-500">Credit</div>
+              <div className="text-lg font-bold text-cyan-700">{dailyReportSummary.credit.toFixed(2)}</div>
+            </div>
+            <div className="rounded-xl border border-orange-100 bg-orange-50/60 p-4">
+              <div className="text-xs text-gray-500">Debit</div>
+              <div className="text-lg font-bold text-orange-700">{dailyReportSummary.debit.toFixed(2)}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-gray-500">Expected Balance</div>
+              <div className="text-lg font-bold text-slate-900">{dailyReportSummary.expectedBalance.toFixed(2)}</div>
+            </div>
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
+              <div className="text-xs text-gray-500">Current Balance</div>
+              <div className="text-lg font-bold text-indigo-700">{dailyReportSummary.endBalance.toFixed(2)}</div>
+            </div>
+            <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-4">
+              <div className="text-xs text-gray-500">Difference</div>
+              <div className="text-lg font-bold text-rose-700">{dailyReportSummary.difference.toFixed(2)}</div>
+            </div>
+          </div>
+        </section>
+
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
             <h3 className="text-lg font-semibold text-gray-900 mb-1">Sales Trend (Last 7 Days)</h3>
@@ -414,12 +583,12 @@ export default function OutletPosDashboardPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
-                {sales.slice(0, 8).length === 0 ? (
+                {paginatedLatestSales.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-4 py-6 text-center text-sm text-gray-500">No sales found.</td>
                   </tr>
                 ) : (
-                  sales.slice(0, 8).map((sale) => (
+                  paginatedLatestSales.map((sale) => (
                     <tr key={sale.id}>
                       <td className="px-4 py-2 text-sm text-gray-800">{sale.sale_number}</td>
                       <td className="px-4 py-2 text-sm text-gray-700">{new Date(sale.sale_date).toLocaleString()}</td>
@@ -431,6 +600,51 @@ export default function OutletPosDashboardPage() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 border-t border-pink-100 bg-pink-50/40 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-gray-600">
+              Showing {sales.length === 0 ? 0 : latestSalesStartIndex + 1} to {latestSalesEndIndex} of {sales.length} sales
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Rows</label>
+                <select
+                  value={latestSalesPageSize}
+                  onChange={(e) => {
+                    setLatestSalesPageSize(Number(e.target.value));
+                    setLatestSalesPage(1);
+                  }}
+                  className="rounded-md border border-pink-200 bg-white px-2 py-1 text-sm text-gray-700"
+                >
+                  <option value={5}>5</option>
+                  <option value={8}>8</option>
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLatestSalesPage((prev) => Math.max(1, prev - 1))}
+                  disabled={safeLatestSalesPage <= 1}
+                  className="rounded-full border border-pink-200 bg-white px-3 py-1 text-xs font-semibold text-pink-700 transition hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <span className="text-sm font-semibold text-gray-700">
+                  Page {safeLatestSalesPage} of {latestSalesTotalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLatestSalesPage((prev) => Math.min(latestSalesTotalPages, prev + 1))}
+                  disabled={safeLatestSalesPage >= latestSalesTotalPages}
+                  className="rounded-full border border-pink-200 bg-white px-3 py-1 text-xs font-semibold text-pink-700 transition hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           </div>
         </section>
       </main>

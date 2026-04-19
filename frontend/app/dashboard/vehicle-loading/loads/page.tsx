@@ -199,6 +199,8 @@ interface LoadCustomerBaseRow {
   balance: number;
 }
 
+const PAGE_SIZE = 10;
+
 export default function LoadsPage() {
   const [token, setToken] = useState('');
   const [loads, setLoads] = useState<Load[]>([]);
@@ -218,6 +220,9 @@ export default function LoadsPage() {
   const [routes, setRoutes] = useState<Route[]>([]);
   const [confirmAction, setConfirmAction] = useState<{ type: 'delete' | 'complete'; load: Load } | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | Load['status']>('all');
+  const [currentPage, setCurrentPage] = useState(1);
   const [deliverySummary, setDeliverySummary] = useState<LoadDeliverySummary | null>(null);
   const [formData, setFormData] = useState({
     load_number: '',
@@ -792,90 +797,179 @@ export default function LoadsPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending': return 'bg-yellow-100 text-yellow-800';
-      case 'in_transit': return 'bg-blue-100 text-blue-800';
-      case 'delivered': return 'bg-green-100 text-green-800';
-      case 'cancelled': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'pending': return 'border border-amber-200 bg-amber-100 text-amber-700';
+      case 'in_transit': return 'border border-blue-200 bg-blue-100 text-blue-700';
+      case 'delivered': return 'border border-emerald-200 bg-emerald-100 text-emerald-700';
+      case 'cancelled': return 'border border-rose-200 bg-rose-100 text-rose-700';
+      default: return 'border border-slate-200 bg-slate-100 text-slate-700';
     }
   };
 
+  const modalInputClass = 'w-full rounded-xl border border-emerald-200/80 bg-white/90 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100';
+  const modalInputReadonlyClass = 'w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-sm text-slate-600 shadow-sm cursor-not-allowed';
+  const modalSectionClass = 'rounded-2xl border border-white/70 bg-gradient-to-br from-white to-emerald-50/45 p-4 shadow-sm';
+  const modalLabelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500';
+  const detailsCardClass = 'rounded-xl border border-white/70 bg-gradient-to-br from-white to-slate-50 p-3 shadow-sm';
+  const detailsTableWrapClass = 'overflow-x-auto rounded-2xl border border-white/70 bg-white/95 shadow-sm';
+
+  const filteredLoads = useMemo(() => {
+    return loads.filter((load) => {
+      const haystack = `${load.load_number} ${load.vehicle?.registration_number || ''} ${load.driver?.name || ''} ${load.route?.name || ''} ${load.notes || ''}`.toLowerCase();
+      const matchesSearch = haystack.includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || load.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [loads, searchTerm, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLoads.length / PAGE_SIZE));
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedLoads = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredLoads.slice(start, start + PAGE_SIZE);
+  }, [filteredLoads, currentPage]);
+
+  const visiblePages = useMemo(() => {
+    const maxVisible = 5;
+    if (totalPages <= maxVisible) {
+      return Array.from({ length: totalPages }, (_, index) => index + 1);
+    }
+
+    const half = Math.floor(maxVisible / 2);
+    let start = Math.max(1, currentPage - half);
+    const end = Math.min(totalPages, start + maxVisible - 1);
+    start = Math.max(1, end - maxVisible + 1);
+
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  }, [currentPage, totalPages]);
+
+  const rowStart = filteredLoads.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const rowEnd = Math.min(currentPage * PAGE_SIZE, filteredLoads.length);
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-green-500"></div>
+      <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.12),_transparent_30%),linear-gradient(180deg,_#f0fdf4_0%,_#eff6ff_100%)]">
+        <div className="h-14 w-14 animate-spin rounded-full border-b-2 border-emerald-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Loads Management</h1>
-        <button
-          onClick={() => {
-            setEditingLoad(null);
-            resetForm();
-            setFormData(prev => ({ ...prev, load_number: generateLoadNumber() }));
-            setShowModal(true);
-          }}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
-        >
-          Add New Load
-        </button>
-      </div>
+    <div className="relative space-y-6">
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.12),_transparent_26%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.12),_transparent_30%),linear-gradient(180deg,_#f0fdf4_0%,_#eff6ff_55%,_#f8fafc_100%)]" />
 
-      {/* Loads Table */}
-      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+      <section className="rounded-[28px] border border-white/70 bg-white/85 px-6 py-6 shadow-[0_26px_90px_-45px_rgba(16,185,129,0.5)] backdrop-blur-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Loads Management</h1>
+            <p className="mt-1 text-sm text-slate-600">Plan, track, and review vehicle loads with delivery status visibility.</p>
+          </div>
+          <button
+            onClick={() => {
+              setEditingLoad(null);
+              resetForm();
+              setFormData((prev) => ({ ...prev, load_number: generateLoadNumber() }));
+              setShowModal(true);
+            }}
+            className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700"
+          >
+            Add New Load
+          </button>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/60 bg-white/90 p-5 shadow-[0_18px_65px_-35px_rgba(30,64,175,0.45)] backdrop-blur-lg">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_220px]">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Search Loads</label>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by load no, vehicle, driver, route or notes"
+              className="w-full rounded-xl border border-emerald-200 bg-gradient-to-b from-white to-emerald-50/40 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Status Filter</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | Load['status'])}
+              className="w-full rounded-xl border border-blue-200 bg-gradient-to-b from-white to-blue-50/35 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+            >
+              <option value="all">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="in_transit">In Transit</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-white/60 bg-white/90 shadow-[0_18px_65px_-35px_rgba(16,185,129,0.45)] backdrop-blur-lg">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 px-5 py-4">
+          <h2 className="text-lg font-semibold text-slate-900">Load Preview Table</h2>
+          <div className="text-sm text-slate-600">Showing {rowStart} to {rowEnd} of {filteredLoads.length}</div>
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-slate-200">
+            <thead className="bg-slate-100/80">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Load Number
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Vehicle
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Driver
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Route
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Status
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Weight (kg)
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Actions
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {loads.map((load) => (
-                <tr key={load.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+            <tbody className="bg-white divide-y divide-slate-100">
+              {paginatedLoads.map((load) => (
+                <tr key={load.id} className="transition hover:bg-emerald-50/35">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-900">
                     {load.load_number}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {load.vehicle?.registration_number}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                    {load.vehicle?.registration_number || '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {load.driver?.name}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                    {load.driver?.name || '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {load.route?.name}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                    {load.route?.name || '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(load.status)}`}>
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase ${getStatusColor(load.status)}`}>
                       {load.status.replace('_', ' ')}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
                     {load.total_weight.toLocaleString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -908,17 +1002,97 @@ export default function LoadsPage() {
                   </td>
                 </tr>
               ))}
+
+              {paginatedLoads.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-6 py-10 text-center">
+                    <div className="text-base font-medium text-slate-800">No Loads Found</div>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {searchTerm || statusFilter !== 'all'
+                        ? 'Try adjusting your search or filter criteria.'
+                        : 'Add your first load to get started.'}
+                    </p>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
-      </div>
+
+        <div className="flex flex-col gap-3 border-t border-slate-200/80 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-slate-600">Page {currentPage} of {totalPages}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+
+            {visiblePages.map((pageNo) => (
+              <button
+                key={pageNo}
+                type="button"
+                onClick={() => setCurrentPage(pageNo)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  currentPage === pageNo
+                    ? 'bg-emerald-600 text-white'
+                    : 'border border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {pageNo}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Pending Loads</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{loads.filter((load) => load.status === 'pending').length}</p>
+        </div>
+
+        <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">In Transit</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{loads.filter((load) => load.status === 'in_transit').length}</p>
+        </div>
+
+        <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Delivered</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{loads.filter((load) => load.status === 'delivered').length}</p>
+        </div>
+
+        <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Total Weight</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">
+            {loads.reduce((sum, load) => sum + Number(load.total_weight || 0), 0).toFixed(2)} kg
+          </p>
+        </div>
+      </section>
 
       {showDetailsModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-16 mx-auto p-5 border w-full max-w-6xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
-            <div className="mt-3">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold text-gray-900">Vehicle Load Details</h3>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/45 px-4 py-8 backdrop-blur-sm">
+          <div className="mx-auto w-full max-w-7xl">
+            <div className="overflow-hidden rounded-[30px] border border-white/70 bg-white/90 shadow-[0_30px_120px_-50px_rgba(16,185,129,0.55)] backdrop-blur-xl">
+            <div className="mt-0">
+              <div className="flex items-start justify-between border-b border-white/70 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-6 py-5 text-white">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-100">Route Intelligence</p>
+                  <h3 className="mt-1 text-2xl font-bold">Vehicle Load Details</h3>
+                  <p className="mt-1 text-sm text-emerald-50/90">Review operational, payment, and profitability data in one consolidated view.</p>
+                </div>
                 <button
                   onClick={() => {
                     setShowDetailsModal(false);
@@ -928,78 +1102,78 @@ export default function LoadsPage() {
                     setLoadInvoices([]);
                     setLoadPayments([]);
                   }}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                  className="rounded-full border border-white/40 bg-white/20 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/30"
                 >
-                  ×
+                  Close
                 </button>
               </div>
 
               {detailsLoading ? (
-                <div className="py-12 text-center text-gray-600">Loading details...</div>
+                <div className="py-12 text-center text-slate-600">Loading details...</div>
               ) : !selectedLoadDetails ? (
-                <div className="py-12 text-center text-gray-600">No details found.</div>
+                <div className="py-12 text-center text-slate-600">No details found.</div>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-6 px-6 py-6">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Load Number</p>
-                      <p className="text-sm font-semibold text-gray-900">{selectedLoadDetails.load_number}</p>
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Load Number</p>
+                      <p className="text-sm font-semibold text-slate-900">{selectedLoadDetails.load_number}</p>
                     </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Status</p>
-                      <p className="text-sm font-semibold text-gray-900">{selectedLoadDetails.status.replace('_', ' ')}</p>
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Status</p>
+                      <p className="text-sm font-semibold text-slate-900">{selectedLoadDetails.status.replace('_', ' ')}</p>
                     </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Load Date</p>
-                      <p className="text-sm font-semibold text-gray-900">{new Date(selectedLoadDetails.load_date).toLocaleDateString()}</p>
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Load Date</p>
+                      <p className="text-sm font-semibold text-slate-900">{new Date(selectedLoadDetails.load_date).toLocaleDateString()}</p>
                     </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Delivery Date</p>
-                      <p className="text-sm font-semibold text-gray-900">
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Delivery Date</p>
+                      <p className="text-sm font-semibold text-slate-900">
                         {selectedLoadDetails.delivery_date ? new Date(selectedLoadDetails.delivery_date).toLocaleDateString() : '-'}
                       </p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Vehicle</p>
-                      <p className="text-sm font-semibold text-gray-900">
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Vehicle</p>
+                      <p className="text-sm font-semibold text-slate-900">
                         {selectedLoadDetails.vehicle?.registration_number || '-'} ({selectedLoadDetails.vehicle?.type || '-'})
                       </p>
                     </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Driver</p>
-                      <p className="text-sm font-semibold text-gray-900">{selectedLoadDetails.driver?.name || '-'}</p>
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Driver</p>
+                      <p className="text-sm font-semibold text-slate-900">{selectedLoadDetails.driver?.name || '-'}</p>
                     </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Sales Ref</p>
-                      <p className="text-sm font-semibold text-gray-900">
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Sales Ref</p>
+                      <p className="text-sm font-semibold text-slate-900">
                         {selectedLoadDetails.sales_ref?.name || `${selectedLoadDetails.sales_ref?.first_name || ''} ${selectedLoadDetails.sales_ref?.last_name || ''}`.trim() || '-'}
                       </p>
                     </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Route</p>
-                      <p className="text-sm font-semibold text-gray-900">
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Route</p>
+                      <p className="text-sm font-semibold text-slate-900">
                         {selectedLoadDetails.route?.name || '-'} ({selectedLoadDetails.route?.origin || '-'} → {selectedLoadDetails.route?.destination || '-'})
                       </p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Total Weight</p>
-                      <p className="text-sm font-semibold text-gray-900">{Number(selectedLoadDetails.total_weight).toFixed(2)} kg</p>
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Total Weight</p>
+                      <p className="text-sm font-semibold text-slate-900">{Number(selectedLoadDetails.total_weight).toFixed(2)} kg</p>
                     </div>
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500 uppercase">Total Items</p>
-                      <p className="text-sm font-semibold text-gray-900">{selectedLoadItems.length}</p>
+                    <div className={detailsCardClass}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Total Items</p>
+                      <p className="text-sm font-semibold text-slate-900">{selectedLoadItems.length}</p>
                     </div>
                   </div>
 
-                  <div>
-                    <p className="text-xs text-gray-500 uppercase mb-1">Notes</p>
-                    <p className="text-sm text-gray-800">{selectedLoadDetails.notes || '-'}</p>
+                  <div className="rounded-xl border border-white/70 bg-white/80 p-3">
+                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500 mb-1">Notes</p>
+                    <p className="text-sm text-slate-700">{selectedLoadDetails.notes || '-'}</p>
                   </div>
 
                   {deliverySummary && (
@@ -1116,9 +1290,9 @@ export default function LoadsPage() {
                     </div>
                   )}
 
-                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                    <div className="px-4 pt-3 pb-1 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Collected Payment Details (By Load)</span>
+                  <div className={detailsTableWrapClass}>
+                    <div className="px-4 pt-3 pb-1 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Collected Payment Details (By Load)</span>
                     </div>
                     <table className="min-w-full divide-y divide-gray-200 text-xs">
                       <thead className="bg-gray-50">
@@ -1174,9 +1348,9 @@ export default function LoadsPage() {
                     </table>
                   </div>
 
-                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                    <div className="px-4 pt-3 pb-1 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Customer Base Summary (By Load)</span>
+                  <div className={detailsTableWrapClass}>
+                    <div className="px-4 pt-3 pb-1 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Customer Base Summary (By Load)</span>
                     </div>
                     <table className="min-w-full divide-y divide-gray-200 text-xs">
                       <thead className="bg-gray-50">
@@ -1235,9 +1409,9 @@ export default function LoadsPage() {
                   </div>
 
                   {/* Loaded items table */}
-                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                    <div className="px-4 pt-3 pb-1 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Loaded Items (Truck)</span>
+                  <div className={detailsTableWrapClass}>
+                    <div className="px-4 pt-3 pb-1 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Loaded Items (Truck)</span>
                     </div>
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
@@ -1269,9 +1443,9 @@ export default function LoadsPage() {
                     </table>
                   </div>
 
-                  <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                    <div className="px-4 pt-3 pb-1 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Sold Items & Profit (By Load)</span>
+                  <div className={detailsTableWrapClass}>
+                    <div className="px-4 pt-3 pb-1 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Sold Items & Profit (By Load)</span>
                     </div>
                     <table className="min-w-full divide-y divide-gray-200 text-xs">
                       <thead className="bg-gray-50">
@@ -1349,14 +1523,14 @@ export default function LoadsPage() {
                     <button
                       type="button"
                       onClick={handlePrintDetails}
-                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+                      className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700"
                     >
                       Print
                     </button>
                     <button
                       type="button"
                       onClick={handleDownloadDetails}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                      className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-200/70 transition hover:from-blue-700 hover:to-cyan-700"
                     >
                       Download CSV
                     </button>
@@ -1364,6 +1538,7 @@ export default function LoadsPage() {
                 </div>
               )}
             </div>
+          </div>
           </div>
         </div>
       )}
@@ -1421,48 +1596,52 @@ export default function LoadsPage() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-full max-w-4xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
-            <div className="mt-3">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold text-gray-900">
-                  {editingLoad ? 'Edit Load' : 'Create New Load'}
-                </h3>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/45 px-4 py-8 backdrop-blur-sm">
+          <div className="mx-auto w-full max-w-5xl">
+            <div className="overflow-hidden rounded-[30px] border border-white/70 bg-white/90 shadow-[0_30px_120px_-50px_rgba(16,185,129,0.55)] backdrop-blur-xl">
+              <div className="flex items-start justify-between border-b border-white/70 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-6 py-5 text-white">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-100">Load Planner</p>
+                  <h3 className="mt-1 text-2xl font-bold">
+                    {editingLoad ? 'Edit Load' : 'Create New Load'}
+                  </h3>
+                  <p className="mt-1 text-sm text-emerald-50/90">Assign fleet, route, and weight details for dispatch operations.</p>
+                </div>
                 <button
                   onClick={() => {
                     setShowModal(false);
                     setEditingLoad(null);
                     resetForm();
                   }}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                  className="rounded-full border border-white/40 bg-white/20 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/30"
                 >
-                  ×
+                  Close
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-6">
+              <form onSubmit={handleSubmit} className="max-h-[80vh] space-y-5 overflow-y-auto px-6 py-6">
                 {/* Basic Information */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-lg font-semibold text-gray-800 mb-4">Basic Information</h4>
+                <div className={modalSectionClass}>
+                  <h4 className="mb-4 text-base font-semibold text-slate-900">Basic Information</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Load Number</label>
+                      <label className={modalLabelClass}>Load Number</label>
                       <input
                         type="text"
                         value={formData.load_number}
                         readOnly
-                        className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-gray-50 text-gray-900 cursor-not-allowed"
+                        className={modalInputReadonlyClass}
                         placeholder="VL-2024-001"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Load Date</label>
+                      <label className={modalLabelClass}>Load Date</label>
                       <input
                         type="date"
                         value={formData.load_date}
                         onChange={(e) => setFormData({ ...formData, load_date: e.target.value })}
-                        className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                        className={modalInputClass}
                         required
                       />
                     </div>
@@ -1470,15 +1649,15 @@ export default function LoadsPage() {
                 </div>
 
                 {/* Assignment Information */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-lg font-semibold text-gray-800 mb-4">Assignment</h4>
+                <div className={modalSectionClass}>
+                  <h4 className="mb-4 text-base font-semibold text-slate-900">Assignment</h4>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Vehicle</label>
+                      <label className={modalLabelClass}>Vehicle</label>
                       <select
                         value={formData.vehicle_id}
                         onChange={(e) => setFormData({ ...formData, vehicle_id: e.target.value })}
-                        className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                        className={modalInputClass}
                         required
                       >
                         <option value="">Select Vehicle</option>
@@ -1490,11 +1669,11 @@ export default function LoadsPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Driver</label>
+                      <label className={modalLabelClass}>Driver</label>
                       <select
                         value={formData.driver_id}
                         onChange={(e) => setFormData({ ...formData, driver_id: e.target.value })}
-                        className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                        className={modalInputClass}
                         required
                       >
                         <option value="">Select Driver</option>
@@ -1506,11 +1685,11 @@ export default function LoadsPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Route</label>
+                      <label className={modalLabelClass}>Route</label>
                       <select
                         value={formData.route_id}
                         onChange={(e) => setFormData({ ...formData, route_id: e.target.value })}
-                        className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                        className={modalInputClass}
                         required
                       >
                         <option value="">Select Route</option>
@@ -1525,11 +1704,11 @@ export default function LoadsPage() {
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Sales Ref</label>
+                      <label className={modalLabelClass}>Sales Ref</label>
                       <select
                         value={formData.sales_ref_id}
                         onChange={(e) => setFormData({ ...formData, sales_ref_id: e.target.value })}
-                        className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                        className={modalInputClass}
                       >
                         <option value="">Select Sales Ref</option>
                         {Array.isArray(salesRefs) && salesRefs.map((salesRef) => (
@@ -1543,17 +1722,17 @@ export default function LoadsPage() {
                 </div>
 
                 {/* Load Details */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-lg font-semibold text-gray-800 mb-4">Load Details</h4>
+                <div className={modalSectionClass}>
+                  <h4 className="mb-4 text-base font-semibold text-slate-900">Load Details</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Total Weight (kg)</label>
+                      <label className={modalLabelClass}>Total Weight (kg)</label>
                       <input
                         type="number"
                         step="0.01"
                         value={formData.total_weight}
                         onChange={(e) => setFormData({ ...formData, total_weight: e.target.value })}
-                        className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                        className={modalInputClass}
                         placeholder="2500.00"
                         required
                       />
@@ -1562,21 +1741,21 @@ export default function LoadsPage() {
                 </div>
 
                 {/* Additional Information */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-lg font-semibold text-gray-800 mb-4">Additional Information</h4>
+                <div className={modalSectionClass}>
+                  <h4 className="mb-4 text-base font-semibold text-slate-900">Additional Information</h4>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+                    <label className={modalLabelClass}>Notes</label>
                     <textarea
                       value={formData.notes}
                       onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                       rows={4}
-                      className="w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-green-500 focus:border-green-500 text-gray-900"
+                      className={modalInputClass}
                       placeholder="Enter any additional notes about this load..."
                     />
                   </div>
                 </div>
 
-                <div className="flex justify-end space-x-3 pt-4 border-t">
+                <div className="flex justify-end gap-3 border-t border-slate-200/80 pt-4">
                   <button
                     type="button"
                     onClick={() => {
@@ -1584,13 +1763,13 @@ export default function LoadsPage() {
                       setEditingLoad(null);
                       resetForm();
                     }}
-                    className="bg-gray-300 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-400 transition-colors font-medium"
+                    className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium"
+                    className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700"
                   >
                     {editingLoad ? 'Update Load' : 'Create Load'}
                   </button>

@@ -34,6 +34,15 @@ class Employee extends Model
         'commission_base',
         'overtime_payment_per_hour',
         'deduction_late_hour',
+        'epf_employee_contribution',
+        'epf_employer_contribution',
+        'etf_employee_contribution',
+        'etf_employer_contribution',
+        'tin',
+        'tax_applicable',
+        'tax_relief_eligible',
+        'apit_tax_amount',
+        'apit_tax_rate',
         'employee_type',
         'status',
     ];
@@ -45,6 +54,14 @@ class Employee extends Model
         'commission' => 'decimal:2',
         'overtime_payment_per_hour' => 'decimal:2',
         'deduction_late_hour' => 'decimal:2',
+        'epf_employee_contribution' => 'decimal:2',
+        'epf_employer_contribution' => 'decimal:2',
+        'etf_employee_contribution' => 'decimal:2',
+        'etf_employer_contribution' => 'decimal:2',
+        'tax_applicable' => 'boolean',
+        'tax_relief_eligible' => 'boolean',
+        'apit_tax_amount' => 'decimal:2',
+        'apit_tax_rate' => 'decimal:2',
     ];
 
     public function tenant(): BelongsTo

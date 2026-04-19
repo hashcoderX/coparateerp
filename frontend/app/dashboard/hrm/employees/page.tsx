@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
@@ -31,6 +31,15 @@ interface Employee {
   commission_base?: 'company_profit' | 'own_business';
   overtime_payment_per_hour?: number;
   deduction_late_hour?: number;
+  epf_employee_contribution?: number;
+  epf_employer_contribution?: number;
+  etf_employee_contribution?: number;
+  etf_employer_contribution?: number;
+  tin?: string;
+  tax_applicable?: boolean;
+  tax_relief_eligible?: boolean;
+  apit_tax_amount?: number;
+  apit_tax_rate?: number;
   status: 'active' | 'inactive';
   user?: { role?: string };
   department: { id: number; name: string };
@@ -83,6 +92,12 @@ interface Department {
 interface Designation {
   id: number;
   name: string;
+  source?: 'designation' | 'role';
+}
+
+interface RoleOption {
+  id: number;
+  name: string;
 }
 
 interface Branch {
@@ -104,9 +119,23 @@ interface LeaveType {
 interface EmployeeLeaveBalance {
   leave_type_id: number;
   leave_type_name: string;
-  balance: number;
-  accrual_rate: number;
+  days: number;
+  paid: boolean;
+  approval: 'auto' | 'manager' | 'hr' | 'management';
 }
+
+const DEFAULT_LEAVE_TYPES: LeaveType[] = [
+  { id: -1, name: 'Annual Leave', code: 'annual', description: 'Annual leave', max_days_per_year: 14, requires_documentation: false, is_active: true },
+  { id: -2, name: 'Sick Leave', code: 'sick', description: 'Sick leave', max_days_per_year: 14, requires_documentation: true, is_active: true },
+  { id: -3, name: 'Casual Leave', code: 'casual', description: 'Casual leave', max_days_per_year: 7, requires_documentation: false, is_active: true },
+  { id: -4, name: 'Maternity Leave', code: 'maternity', description: 'Maternity leave', max_days_per_year: 84, requires_documentation: true, is_active: true },
+  { id: -5, name: 'Paternity Leave', code: 'paternity', description: 'Paternity leave', max_days_per_year: 7, requires_documentation: false, is_active: true },
+  { id: -6, name: 'Unpaid Leave', code: 'unpaid', description: 'Unpaid leave', max_days_per_year: 30, requires_documentation: false, is_active: true },
+  { id: -7, name: 'Religious/Festival Leave', code: 'religious_festival', description: 'Religious / festival leave', max_days_per_year: 5, requires_documentation: false, is_active: true },
+  { id: -8, name: 'Study Leave', code: 'study', description: 'Study leave', max_days_per_year: 10, requires_documentation: true, is_active: true },
+  { id: -9, name: 'Compensatory Leave', code: 'compensatory', description: 'Compensatory leave', max_days_per_year: 5, requires_documentation: false, is_active: true },
+  { id: -10, name: 'Medical / Hospitalization Leave', code: 'medical_hospitalization', description: 'Medical / hospitalization leave', max_days_per_year: 30, requires_documentation: true, is_active: true },
+];
 
 export default function Employees() {
   const [token, setToken] = useState('');
@@ -115,6 +144,12 @@ export default function Employees() {
   const [designations, setDesignations] = useState<Designation[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [designationFilter, setDesignationFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -143,6 +178,13 @@ export default function Employees() {
   const [commissionBase, setCommissionBase] = useState<'company_profit' | 'own_business' | ''>('');
   const [overtimePaymentPerHour, setOvertimePaymentPerHour] = useState('');
   const [deductionLateHour, setDeductionLateHour] = useState('');
+  const [epfEmployeeContribution, setEpfEmployeeContribution] = useState('');
+  const [epfEmployerContribution, setEpfEmployerContribution] = useState('');
+  const [etfEmployeeContribution, setEtfEmployeeContribution] = useState('');
+  const [etfEmployerContribution, setEtfEmployerContribution] = useState('');
+  const [tin, setTin] = useState('');
+  const [taxApplicable, setTaxApplicable] = useState<'yes' | 'no'>('no');
+  const [taxReliefEligible, setTaxReliefEligible] = useState<'yes' | 'no'>('no');
   const [departmentId, setDepartmentId] = useState('');
   const [designationId, setDesignationId] = useState('');
   const [branchId, setBranchId] = useState('');
@@ -187,13 +229,97 @@ export default function Employees() {
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
   const [employeeLeaveBalances, setEmployeeLeaveBalances] = useState<EmployeeLeaveBalance[]>([]);
   const [selectedLeaveType, setSelectedLeaveType] = useState('');
-  const [leaveBalance, setLeaveBalance] = useState('');
-  const [accrualRate, setAccrualRate] = useState('');
+  const [leaveDays, setLeaveDays] = useState('');
+  const [leavePaid, setLeavePaid] = useState<'yes' | 'no'>('yes');
+  const [leaveApproval, setLeaveApproval] = useState<'auto' | 'manager' | 'hr' | 'management'>('manager');
 
   // Actions menu state
   const [openMenuFor, setOpenMenuFor] = useState<number | null>(null);
   const [openAttendanceFor, setOpenAttendanceFor] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const filteredEmployees = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+
+    return employees.filter((employee) => {
+      const matchesKeyword =
+        !keyword ||
+        employee.employee_code?.toLowerCase().includes(keyword) ||
+        employee.first_name?.toLowerCase().includes(keyword) ||
+        employee.last_name?.toLowerCase().includes(keyword) ||
+        employee.email?.toLowerCase().includes(keyword) ||
+        employee.department?.name?.toLowerCase().includes(keyword) ||
+        employee.designation?.name?.toLowerCase().includes(keyword) ||
+        employee.branch?.name?.toLowerCase().includes(keyword);
+
+      const matchesStatus = statusFilter === 'all' || employee.status === statusFilter;
+      const matchesDepartment = departmentFilter === 'all' || String(employee.department?.id) === departmentFilter;
+      const matchesDesignation = designationFilter === 'all' || String(employee.designation?.id) === designationFilter;
+      const matchesBranch = branchFilter === 'all' || String(employee.branch?.id) === branchFilter;
+
+      return matchesKeyword && matchesStatus && matchesDepartment && matchesDesignation && matchesBranch;
+    });
+  }, [employees, searchTerm, statusFilter, departmentFilter, designationFilter, branchFilter]);
+
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(filteredEmployees.length / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, filteredEmployees.length);
+  const paginatedEmployees = filteredEmployees.slice(startIndex, startIndex + pageSize);
+
+  const calculateMonthlyApit = (monthlyIncome: number) => {
+    const slabs = [
+      { limit: 100000, rate: 0 },
+      { limit: 141667, rate: 0.06 },
+      { limit: 183333, rate: 0.12 },
+      { limit: 225000, rate: 0.18 },
+      { limit: 266667, rate: 0.24 },
+      { limit: 308333, rate: 0.30 },
+      { limit: Number.POSITIVE_INFINITY, rate: 0.36 },
+    ];
+
+    let remaining = Math.max(0, monthlyIncome);
+    let previousLimit = 0;
+    let taxAmount = 0;
+    let marginalRate = 0;
+
+    for (const slab of slabs) {
+      if (remaining <= 0) break;
+
+      const slabRange = Number.isFinite(slab.limit) ? Math.max(0, slab.limit - previousLimit) : remaining;
+      const taxable = Math.min(remaining, slabRange);
+
+      if (taxable > 0) {
+        taxAmount += taxable * slab.rate;
+        if (slab.rate > 0) {
+          marginalRate = slab.rate * 100;
+        }
+      }
+
+      remaining -= taxable;
+      previousLimit = slab.limit;
+    }
+
+    return {
+      taxAmount: Number(taxAmount.toFixed(2)),
+      marginalRate: Number(marginalRate.toFixed(2)),
+    };
+  };
+
+  const monthlySalary = Number.parseFloat(basicSalary || '0') || 0;
+  const apitPreview = taxApplicable === 'yes'
+    ? calculateMonthlyApit(monthlySalary)
+    : { taxAmount: 0, marginalRate: 0 };
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, departmentFilter, designationFilter, branchFilter]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -286,9 +412,11 @@ export default function Employees() {
       }));
 
       setEmployees(normalizedEmployees);
+      setCurrentPage(1);
     } catch (error) {
       console.error('Error fetching employees:', error);
       setEmployees([]);
+      setCurrentPage(1);
     }
   };
 
@@ -311,10 +439,50 @@ export default function Employees() {
     if (!tokenToUse) return;
     
     try {
-      const response = await axios.get('http://localhost:8000/api/hr/designations', {
-        headers: { Authorization: `Bearer ${tokenToUse}` },
-      });
-      setDesignations(response.data.data || []);
+      const [designationRes, roleRes] = await Promise.all([
+        axios.get('http://localhost:8000/api/hr/designations', {
+          headers: { Authorization: `Bearer ${tokenToUse}` },
+        }),
+        axios.get('http://localhost:8000/api/roles', {
+          headers: { Authorization: `Bearer ${tokenToUse}` },
+          params: { per_page: 1000 },
+        }),
+      ]);
+
+      const designationRows = Array.isArray(designationRes.data)
+        ? designationRes.data
+        : (designationRes.data?.data || []);
+
+      const roleRows = Array.isArray(roleRes.data)
+        ? roleRes.data
+        : (roleRes.data?.data || []);
+
+      const normalizedDesignationRows: Designation[] = designationRows.map((row: any) => ({
+        id: Number(row.id),
+        name: String(row.name || ''),
+        source: 'designation',
+      }));
+
+      const usedNames = new Set(
+        normalizedDesignationRows
+          .map((row) => row.name.trim().toLowerCase())
+          .filter(Boolean)
+      );
+
+      const roleOnlyRows: Designation[] = (roleRows as RoleOption[])
+        .map((row) => ({
+          id: -Math.abs(Number(row.id) || 0),
+          name: String(row.name || ''),
+          source: 'role' as const,
+        }))
+        .filter((row) => {
+          const key = row.name.trim().toLowerCase();
+          if (!key || usedNames.has(key)) return false;
+          usedNames.add(key);
+          return true;
+        });
+
+      setDesignations([...normalizedDesignationRows, ...roleOnlyRows]);
     } catch (error) {
       console.error('Error fetching designations:', error);
     }
@@ -343,9 +511,23 @@ export default function Employees() {
         headers: { Authorization: `Bearer ${tokenToUse}` },
         params: { per_page: 1000 }
       });
-      setLeaveTypes(response.data.data || []);
+
+      const payload = response.data;
+      const apiRows = Array.isArray(payload)
+        ? payload
+        : (payload?.data?.data || payload?.data || []);
+
+      const normalized = (Array.isArray(apiRows) ? apiRows : []) as LeaveType[];
+      const apiCodes = new Set(normalized.map((row) => String(row.code || '').toLowerCase()).filter(Boolean));
+      const merged = [
+        ...normalized,
+        ...DEFAULT_LEAVE_TYPES.filter((row) => !apiCodes.has(String(row.code).toLowerCase())),
+      ];
+
+      setLeaveTypes(merged);
     } catch (error) {
       console.error('Error fetching leave types:', error);
+      setLeaveTypes(DEFAULT_LEAVE_TYPES);
     }
   };
 
@@ -365,20 +547,31 @@ export default function Employees() {
     setCommissionBase('');
     setOvertimePaymentPerHour('');
     setDeductionLateHour('');
+    setEpfEmployeeContribution('');
+    setEpfEmployerContribution('');
+    setEtfEmployeeContribution('');
+    setEtfEmployerContribution('');
+    setTin('');
+    setTaxApplicable('no');
+    setTaxReliefEligible('no');
     setDepartmentId('');
     setDesignationId('');
     setBranchId('');
     setStatus('active');
     setEmployeeLeaveBalances([]);
     setSelectedLeaveType('');
-    setLeaveBalance('');
-    setAccrualRate('');
+    setLeaveDays('');
+    setLeavePaid('yes');
+    setLeaveApproval('manager');
     setEditingEmployee(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+
+    const selectedDesignation = designations.find((desig) => desig.id.toString() === designationId);
+    const parsedDesignationId = Number(designationId);
 
     const employeeData = {
       first_name: firstName,
@@ -395,8 +588,16 @@ export default function Employees() {
       commission_base: commissionBase || undefined,
       overtime_payment_per_hour: overtimePaymentPerHour ? parseFloat(overtimePaymentPerHour) : undefined,
       deduction_late_hour: deductionLateHour ? parseFloat(deductionLateHour) : undefined,
+      epf_employee_contribution: epfEmployeeContribution ? parseFloat(epfEmployeeContribution) : undefined,
+      epf_employer_contribution: epfEmployerContribution ? parseFloat(epfEmployerContribution) : undefined,
+      etf_employee_contribution: etfEmployeeContribution ? parseFloat(etfEmployeeContribution) : undefined,
+      etf_employer_contribution: etfEmployerContribution ? parseFloat(etfEmployerContribution) : undefined,
+      tin: tin || undefined,
+      tax_applicable: taxApplicable === 'yes',
+      tax_relief_eligible: taxReliefEligible === 'yes',
       department_id: parseInt(departmentId),
-      designation_id: parseInt(designationId),
+      designation_id: Number.isFinite(parsedDesignationId) && parsedDesignationId > 0 ? parsedDesignationId : undefined,
+      designation_name: selectedDesignation?.name || undefined,
       branch_id: parseInt(branchId),
       status,
       leave_balances: employeeLeaveBalances.length > 0 ? employeeLeaveBalances : undefined,
@@ -415,9 +616,15 @@ export default function Employees() {
       fetchEmployees();
       setShowForm(false);
       resetForm();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving employee:', error);
-      showNotice('Error', 'Failed to save employee. Please try again.', 'error');
+      const backendMessage = error?.response?.data?.message
+        || error?.response?.data?.error
+        || (Array.isArray(error?.response?.data?.errors)
+          ? error.response.data.errors.join(', ')
+          : undefined)
+        || 'Failed to save employee. Please try again.';
+      showNotice('Error', backendMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -439,6 +646,13 @@ export default function Employees() {
     setCommissionBase(employee.commission_base || '');
     setOvertimePaymentPerHour(employee.overtime_payment_per_hour ? employee.overtime_payment_per_hour.toString() : '');
     setDeductionLateHour(employee.deduction_late_hour ? employee.deduction_late_hour.toString() : '');
+    setEpfEmployeeContribution(employee.epf_employee_contribution ? employee.epf_employee_contribution.toString() : '');
+    setEpfEmployerContribution(employee.epf_employer_contribution ? employee.epf_employer_contribution.toString() : '');
+    setEtfEmployeeContribution(employee.etf_employee_contribution ? employee.etf_employee_contribution.toString() : '');
+    setEtfEmployerContribution(employee.etf_employer_contribution ? employee.etf_employer_contribution.toString() : '');
+    setTin(employee.tin || '');
+    setTaxApplicable(employee.tax_applicable ? 'yes' : 'no');
+    setTaxReliefEligible(employee.tax_relief_eligible ? 'yes' : 'no');
     setDepartmentId(employee.department.id.toString());
     setDesignationId(employee.designation.id.toString());
     setBranchId(employee.branch.id.toString());
@@ -488,22 +702,30 @@ export default function Employees() {
   };
 
   const addLeaveBalance = () => {
-    if (!selectedLeaveType || !leaveBalance) return;
+    if (!selectedLeaveType || !leaveDays) return;
 
     const leaveType = leaveTypes.find(lt => lt.id.toString() === selectedLeaveType);
     if (!leaveType) return;
 
+    const days = parseFloat(leaveDays);
+    if (Number.isNaN(days) || days <= 0) return;
+
+    const alreadyAdded = employeeLeaveBalances.some((item) => item.leave_type_id === leaveType.id);
+    if (alreadyAdded) return;
+
     const newBalance: EmployeeLeaveBalance = {
       leave_type_id: leaveType.id,
       leave_type_name: leaveType.name,
-      balance: parseFloat(leaveBalance),
-      accrual_rate: parseFloat(accrualRate) || 0,
+      days,
+      paid: leavePaid === 'yes',
+      approval: leaveApproval,
     };
 
     setEmployeeLeaveBalances([...employeeLeaveBalances, newBalance]);
     setSelectedLeaveType('');
-    setLeaveBalance('');
-    setAccrualRate('');
+    setLeaveDays('');
+    setLeavePaid('yes');
+    setLeaveApproval('manager');
   };
 
   const removeLeaveBalance = (index: number) => {
@@ -569,8 +791,9 @@ export default function Employees() {
     setShowLeaveModal(true);
     // Reset leave form fields
     setSelectedLeaveType('');
-    setLeaveBalance('');
-    setAccrualRate('');
+    setLeaveDays('');
+    setLeavePaid('yes');
+    setLeaveApproval('manager');
     setEmployeeLeaveBalances([]);
   };
 
@@ -910,7 +1133,7 @@ export default function Employees() {
         </div>
 
         {/* Employee List */}
-        <div className="bg-white/70 backdrop-blur-sm shadow-xl rounded-2xl border border-white/20 overflow-hidden">
+        <div className="bg-white/70 backdrop-blur-sm shadow-xl rounded-2xl border border-white/20 overflow-visible relative z-0 min-h-[700px] flex flex-col">
           <div className="bg-gradient-to-r from-blue-500 to-cyan-500 p-6">
             <div className="flex items-center space-x-3">
               <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl">
@@ -923,7 +1146,78 @@ export default function Employees() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="px-6 py-4 border-b border-gray-200 bg-white/70">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search employee, code, email..."
+                className="xl:col-span-2 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+              />
+
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+              >
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+
+              <select
+                value={departmentFilter}
+                onChange={(e) => setDepartmentFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+              >
+                <option value="all">All Departments</option>
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>{department.name}</option>
+                ))}
+              </select>
+
+              <select
+                value={designationFilter}
+                onChange={(e) => setDesignationFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+              >
+                <option value="all">All Designations</option>
+                {Array.from(new Map(employees.map((employee) => [employee.designation.id, employee.designation])).values()).map((designation) => (
+                  <option key={designation.id} value={designation.id}>{designation.name}</option>
+                ))}
+              </select>
+
+              <div className="flex gap-2">
+                <select
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                >
+                  <option value="all">All Branches</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setStatusFilter('all');
+                    setDepartmentFilter('all');
+                    setDesignationFilter('all');
+                    setBranchFilter('all');
+                  }}
+                  className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100 whitespace-nowrap"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto overflow-y-visible flex-1">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -954,7 +1248,7 @@ export default function Employees() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {employees.map((employee) => (
+                {paginatedEmployees.map((employee) => (
                   <tr key={employee.id} className="hover:bg-gray-50 transition-colors duration-200">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {employee.employee_code}
@@ -983,7 +1277,7 @@ export default function Employees() {
                         {employee.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium relative z-20">
                       <div className="relative" ref={openMenuFor === employee.id ? menuRef : undefined}>
                         <button
                           aria-haspopup="menu"
@@ -1006,7 +1300,7 @@ export default function Employees() {
                             id={`row-menu-${employee.id}`}
                             role="menu"
                             tabIndex={-1}
-                            className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-[99]"
+                            className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-[300]"
                           >
                             <button role="menuitem" onClick={() => { openProfile(employee); setOpenMenuFor(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-left text-gray-700 hover:bg-gray-50">
                               <span className="w-4 h-4">👁️</span>
@@ -1052,7 +1346,7 @@ export default function Employees() {
                                 <svg className={`w-4 h-4 transform transition ${openAttendanceFor === employee.id ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor"><path d="M6 6l6 4-6 4V6z"/></svg>
                               </button>
                               {openAttendanceFor === employee.id && (
-                                <div role="menu" tabIndex={-1} className="absolute right-full top-0 mr-1 w-44 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-[99]">
+                                <div role="menu" tabIndex={-1} className="absolute right-full top-0 mr-1 w-44 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-[310]">
                                   <button role="menuitem" onClick={() => { markAttendance(employee, 'present'); setOpenMenuFor(null); setOpenAttendanceFor(null); }} className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-50">Mark Present</button>
                                   <button role="menuitem" onClick={() => { markAttendance(employee, 'absent'); setOpenMenuFor(null); setOpenAttendanceFor(null); }} className="w-full px-3 py-2 text-left text-gray-700 hover:bg-gray-50">Mark Absent</button>
                                 </div>
@@ -1072,13 +1366,44 @@ export default function Employees() {
               </tbody>
             </table>
           </div>
+
+          <div className="px-6 py-4 border-t border-gray-200 bg-white/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <p className="text-sm text-gray-600">
+              Showing {filteredEmployees.length === 0 ? 0 : startIndex + 1} to {endIndex} of {filteredEmployees.length} employees
+              {filteredEmployees.length !== employees.length ? ` (filtered from ${employees.length})` : ''}
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+
+              <span className="text-sm text-gray-700 px-2">
+                Page {currentPage} of {totalPages}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       </main>
 
       {/* Employee Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-7xl w-full max-h-[90vh] overflow-y-auto">
             <div className="bg-gradient-to-r from-blue-500 to-cyan-500 p-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
@@ -1107,6 +1432,11 @@ export default function Employees() {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+                  <h4 className="text-sm font-semibold text-blue-900">General Details</h4>
+                  <p className="text-xs text-blue-700 mt-1">Basic employee identity and contact information.</p>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     First Name *
@@ -1205,15 +1535,23 @@ export default function Employees() {
 
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Profile Image Path
+                    Profile Image
                   </label>
                   <input
-                    type="text"
-                    value={photoPath}
-                    onChange={(e) => setPhotoPath(e.target.value)}
-                    placeholder="e.g., uploads/employees/photo.jpg or full URL"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-500"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setPhotoPath(file.name);
+                    }}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100"
                   />
+                  {photoPath && (
+                    <p className="mt-2 text-xs text-gray-600">
+                      Selected image: {photoPath}
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -1239,6 +1577,11 @@ export default function Employees() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-500"
                     required
                   />
+                </div>
+
+                <div className="md:col-span-2 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+                  <h4 className="text-sm font-semibold text-indigo-900">Other Details</h4>
+                  <p className="text-xs text-indigo-700 mt-1">Compensation, statutory contributions, tax setup, and organizational assignment.</p>
                 </div>
 
                 <div>
@@ -1314,6 +1657,144 @@ export default function Employees() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-500"
                     placeholder="e.g., 5.00"
                   />
+                </div>
+
+                <div className="md:col-span-2 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-cyan-200 bg-cyan-50/70 p-4">
+                    <h4 className="text-sm font-semibold text-cyan-900 mb-3">EPF / ETF Contributions</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          EPF Employee Contribution (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={epfEmployeeContribution}
+                          onChange={(e) => setEpfEmployeeContribution(e.target.value)}
+                          className="w-full px-4 py-3 border border-cyan-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-500 bg-white"
+                          placeholder="e.g., 8.00"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          EPF Employer Contribution (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={epfEmployerContribution}
+                          onChange={(e) => setEpfEmployerContribution(e.target.value)}
+                          className="w-full px-4 py-3 border border-cyan-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-500 bg-white"
+                          placeholder="e.g., 12.00"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          ETF Employee Contribution (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={etfEmployeeContribution}
+                          onChange={(e) => setEtfEmployeeContribution(e.target.value)}
+                          className="w-full px-4 py-3 border border-cyan-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-500 bg-white"
+                          placeholder="e.g., 0.00"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          ETF Employer Contribution (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={etfEmployerContribution}
+                          onChange={(e) => setEtfEmployerContribution(e.target.value)}
+                          className="w-full px-4 py-3 border border-cyan-200 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-500 bg-white"
+                          placeholder="e.g., 3.00"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <h4 className="text-sm font-semibold text-amber-900 mb-3">Tax (PAYE / APIT)</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tax Identification Number (TIN)
+                        </label>
+                        <input
+                          type="text"
+                          value={tin}
+                          onChange={(e) => setTin(e.target.value)}
+                          className="w-full px-4 py-3 border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-500 bg-white"
+                          placeholder="Enter TIN"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tax Applicable
+                        </label>
+                        <select
+                          value={taxApplicable}
+                          onChange={(e) => setTaxApplicable(e.target.value as 'yes' | 'no')}
+                          className="w-full px-4 py-3 border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all duration-200 text-gray-900 bg-white"
+                        >
+                          <option value="no">No</option>
+                          <option value="yes">Yes</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tax Relief Eligible
+                        </label>
+                        <select
+                          value={taxReliefEligible}
+                          onChange={(e) => setTaxReliefEligible(e.target.value as 'yes' | 'no')}
+                          className="w-full px-4 py-3 border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all duration-200 text-gray-900 bg-white"
+                        >
+                          <option value="no">No</option>
+                          <option value="yes">Yes</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 bg-white border border-amber-100 rounded-lg p-3">
+                      <h5 className="text-xs font-semibold text-amber-900 mb-2">PAYE / APIT Monthly Estimate</h5>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                        <div>
+                          <div className="text-gray-600">Salary</div>
+                          <div className="font-semibold text-gray-900">LKR {monthlySalary.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-600">Marginal Rate</div>
+                          <div className="font-semibold text-gray-900">{apitPreview.marginalRate.toFixed(2)}%</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-600">Estimated APIT</div>
+                          <div className="font-semibold text-amber-700">LKR {apitPreview.taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-amber-800 mt-2">
+                        Calculated with Sri Lanka monthly progressive slabs. Final APIT amount is recomputed and saved on backend.
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 <div>
@@ -1422,36 +1903,52 @@ export default function Employees() {
                       </select>
                     </div>
 
-                    {/* Initial Balance - Small width */}
-                    <div className="w-full sm:w-32">
+                    {/* Days - Small width */}
+                    <div className="w-full sm:w-28">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Initial Balance
+                        Days
                       </label>
                       <input
                         type="number"
                         step="0.5"
                         min="0"
-                        value={leaveBalance}
-                        onChange={(e) => setLeaveBalance(e.target.value)}
+                        value={leaveDays}
+                        onChange={(e) => setLeaveDays(e.target.value)}
                         className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors duration-200 text-gray-900 bg-white placeholder-gray-400"
-                        placeholder="15.5"
+                        placeholder="12"
                       />
                     </div>
 
-                    {/* Monthly Accrual - Small width */}
+                    {/* Paid - Small width */}
                     <div className="w-full sm:w-32">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Monthly Accrual
+                        Paid
                       </label>
-                      <input
-                        type="number"
-                        step="0.25"
-                        min="0"
-                        value={accrualRate}
-                        onChange={(e) => setAccrualRate(e.target.value)}
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors duration-200 text-gray-900 bg-white placeholder-gray-400"
-                        placeholder="1.25"
-                      />
+                      <select
+                        value={leavePaid}
+                        onChange={(e) => setLeavePaid(e.target.value as 'yes' | 'no')}
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors duration-200 text-gray-900 bg-white"
+                      >
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </div>
+
+                    {/* Approval - Medium width */}
+                    <div className="w-full sm:w-40">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Approval
+                      </label>
+                      <select
+                        value={leaveApproval}
+                        onChange={(e) => setLeaveApproval(e.target.value as 'auto' | 'manager' | 'hr' | 'management')}
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors duration-200 text-gray-900 bg-white"
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="manager">Manager</option>
+                        <option value="hr">HR</option>
+                        <option value="management">Management</option>
+                      </select>
                     </div>
 
                     {/* Add Balance Button - Compact but prominent */}
@@ -1459,10 +1956,10 @@ export default function Employees() {
                       <button
                         type="button"
                         onClick={addLeaveBalance}
-                        disabled={!selectedLeaveType || !leaveBalance}
+                        disabled={!selectedLeaveType || !leaveDays}
                         className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                       >
-                        Add Balance
+                        Add Leave
                       </button>
                     </div>
                   </div>
@@ -1481,10 +1978,9 @@ export default function Employees() {
                               <div className="min-w-0">
                                 <p className="text-sm font-medium text-gray-900 truncate">{balance.leave_type_name}</p>
                                 <p className="text-xs text-gray-600">
-                                  {balance.balance} days
-                                  {balance.accrual_rate > 0 && (
-                                    <span className="ml-2 text-emerald-600">• +{balance.accrual_rate}/month</span>
-                                  )}
+                                  {balance.days} days
+                                  <span className="ml-2">• Paid: <span className={balance.paid ? 'text-emerald-600' : 'text-amber-600'}>{balance.paid ? 'Yes' : 'No'}</span></span>
+                                  <span className="ml-2">• Approval: <span className="text-blue-600 capitalize">{balance.approval}</span></span>
                                 </p>
                               </div>
                             </div>
@@ -1536,7 +2032,7 @@ export default function Employees() {
 
       {/* Employee Profile Modal */}
       {showProfileModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowProfileModal(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl p-6 max-h-[90vh] overflow-y-auto text-black">
             <div className="flex items-start justify-between mb-6">
@@ -1572,8 +2068,17 @@ export default function Employees() {
                         {profileEmployee.status}
                       </span>
                     </div>
-                    <div><strong>Basic Salary:</strong> ${profileEmployee.basic_salary.toLocaleString()}</div>
+                    <div><strong>Basic Salary:</strong> LKR {profileEmployee.basic_salary.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                     {profileEmployee.commission && <div><strong>Commission:</strong> {profileEmployee.commission}% ({profileEmployee.commission_base})</div>}
+                    <div><strong>EPF Employee (%):</strong> {profileEmployee.epf_employee_contribution ?? 0}%</div>
+                    <div><strong>EPF Employer (%):</strong> {profileEmployee.epf_employer_contribution ?? 0}%</div>
+                    <div><strong>ETF Employee (%):</strong> {profileEmployee.etf_employee_contribution ?? 0}%</div>
+                    <div><strong>ETF Employer (%):</strong> {profileEmployee.etf_employer_contribution ?? 0}%</div>
+                    <div><strong>TIN:</strong> {profileEmployee.tin || 'N/A'}</div>
+                    <div><strong>Tax Applicable:</strong> {profileEmployee.tax_applicable ? 'Yes' : 'No'}</div>
+                    <div><strong>Tax Relief Eligible:</strong> {profileEmployee.tax_relief_eligible ? 'Yes' : 'No'}</div>
+                    <div><strong>PAYE/APIT Rate:</strong> {(profileEmployee.apit_tax_rate ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</div>
+                    <div><strong>PAYE/APIT Amount:</strong> LKR {(profileEmployee.apit_tax_amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                   </div>
                   {profileEmployee.address && <div className="mt-4"><strong>Address:</strong> {profileEmployee.address}</div>}
                 </div>
@@ -1658,9 +2163,9 @@ export default function Employees() {
 
       {/* Documents Modal */}
       {showDocsModal && activeEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDocsModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900">Documents - {activeEmployee.first_name} {activeEmployee.last_name}</h3>
               <button onClick={() => setShowDocsModal(false)} className="absolute top-4 right-4 bg-gradient-to-r from-red-500 to-red-600 text-white p-2 rounded-full shadow-lg hover:shadow-xl transform hover:scale-110 transition-all duration-200 hover:from-red-600 hover:to-red-700">✕</button>
@@ -1747,9 +2252,9 @@ export default function Employees() {
 
       {/* Education Modal */}
       {showEduModal && activeEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowEduModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900">Education - {activeEmployee.first_name} {activeEmployee.last_name}</h3>
               <button onClick={() => setShowEduModal(false)} className="absolute top-4 right-4 bg-gradient-to-r from-red-500 to-red-600 text-white p-2 rounded-full shadow-lg hover:shadow-xl transform hover:scale-110 transition-all duration-200 hover:from-red-600 hover:to-red-700">✕</button>
@@ -1869,9 +2374,9 @@ export default function Employees() {
 
       {/* Experience Modal */}
       {showExpModal && activeEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowExpModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900">Experience - {activeEmployee.first_name} {activeEmployee.last_name}</h3>
               <button onClick={() => setShowExpModal(false)} className="absolute top-4 right-4 bg-gradient-to-r from-red-500 to-red-600 text-white p-2 rounded-full shadow-lg hover:shadow-xl transform hover:scale-110 transition-all duration-200 hover:from-red-600 hover:to-red-700">✕</button>
@@ -1992,7 +2497,7 @@ export default function Employees() {
 
       {/* Allowances and Deductions Modal */}
       {showAllowancesModal && activeEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowAllowancesModal(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
@@ -2144,7 +2649,7 @@ export default function Employees() {
 
       {/* Leave Management Modal */}
       {showLeaveModal && activeEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLeaveModal(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
@@ -2184,36 +2689,52 @@ export default function Employees() {
                     </select>
                   </div>
 
-                  {/* Initial Balance - Small width */}
-                  <div className="w-full sm:w-32">
+                  {/* Days - Small width */}
+                  <div className="w-full sm:w-28">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Initial Balance
+                      Days
                     </label>
                     <input
                       type="number"
                       step="0.5"
                       min="0"
-                      value={leaveBalance}
-                      onChange={(e) => setLeaveBalance(e.target.value)}
+                      value={leaveDays}
+                      onChange={(e) => setLeaveDays(e.target.value)}
                       className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors duration-200 text-gray-900 bg-white placeholder-gray-400"
-                      placeholder="15.5"
+                      placeholder="12"
                     />
                   </div>
 
-                  {/* Monthly Accrual - Small width */}
+                  {/* Paid - Small width */}
                   <div className="w-full sm:w-32">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Monthly Accrual
+                      Paid
                     </label>
-                    <input
-                      type="number"
-                      step="0.25"
-                      min="0"
-                      value={accrualRate}
-                      onChange={(e) => setAccrualRate(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors duration-200 text-gray-900 bg-white placeholder-gray-400"
-                      placeholder="1.25"
-                    />
+                    <select
+                      value={leavePaid}
+                      onChange={(e) => setLeavePaid(e.target.value as 'yes' | 'no')}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors duration-200 text-gray-900 bg-white"
+                    >
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+
+                  {/* Approval - Medium width */}
+                  <div className="w-full sm:w-40">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Approval
+                    </label>
+                    <select
+                      value={leaveApproval}
+                      onChange={(e) => setLeaveApproval(e.target.value as 'auto' | 'manager' | 'hr' | 'management')}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors duration-200 text-gray-900 bg-white"
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="manager">Manager</option>
+                      <option value="hr">HR</option>
+                      <option value="management">Management</option>
+                    </select>
                   </div>
 
                   {/* Add Balance Button - Compact but prominent */}
@@ -2221,10 +2742,10 @@ export default function Employees() {
                     <button
                       type="button"
                       onClick={addLeaveBalance}
-                      disabled={!selectedLeaveType || !leaveBalance}
+                      disabled={!selectedLeaveType || !leaveDays}
                       className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                     >
-                      Add Balance
+                      Add Leave
                     </button>
                   </div>
                 </div>
@@ -2243,10 +2764,9 @@ export default function Employees() {
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-gray-900 truncate">{balance.leave_type_name}</p>
                               <p className="text-xs text-gray-600">
-                                {balance.balance} days
-                                {balance.accrual_rate > 0 && (
-                                  <span className="ml-2 text-emerald-600">• +{balance.accrual_rate}/month</span>
-                                )}
+                                {balance.days} days
+                                <span className="ml-2">• Paid: <span className={balance.paid ? 'text-emerald-600' : 'text-amber-600'}>{balance.paid ? 'Yes' : 'No'}</span></span>
+                                <span className="ml-2">• Approval: <span className="text-blue-600 capitalize">{balance.approval}</span></span>
                               </p>
                             </div>
                           </div>
@@ -2290,9 +2810,9 @@ export default function Employees() {
 
       {/* Confirm Modal */}
       {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeConfirm} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between mb-4">
               <h3 className="text-lg font-bold text-gray-900">{confirmTitle || 'Confirm'}</h3>
               <button onClick={closeConfirm} className="text-gray-500 hover:text-gray-700">✕</button>
@@ -2318,9 +2838,9 @@ export default function Employees() {
 
       {/* Notification Modal */}
       {noticeOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeNotice} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center space-x-2">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${noticeType === 'success' ? 'bg-green-500' : noticeType === 'error' ? 'bg-red-500' : 'bg-blue-500'}`}>

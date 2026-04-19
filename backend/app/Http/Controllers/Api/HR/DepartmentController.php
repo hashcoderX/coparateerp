@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\HR;
 
 use App\Http\Controllers\Controller;
+use App\Models\Company;
 use App\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\Rule;
 
 class DepartmentController extends Controller
 {
@@ -41,12 +43,33 @@ class DepartmentController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'is_active' => 'boolean',
+            'tenant_id' => 'nullable|integer|exists:companies,id',
+            'branch_id' => 'nullable|integer|exists:companies,id',
+        ]);
+
+        $defaultCompany = Company::query()->orderBy('id')->first();
+        if (!$defaultCompany) {
+            return response()->json([
+                'message' => 'Cannot create department: no company exists. Please create a company first.',
+            ], 422);
+        }
+
+        $tenantId = (int)($validated['tenant_id'] ?? $defaultCompany->id);
+        $branchId = (int)($validated['branch_id'] ?? $tenantId);
+
+        $request->validate([
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('departments', 'name')->where(fn ($query) => $query->where('tenant_id', $tenantId)),
+            ],
         ]);
 
         // Set default values for required fields
         $departmentData = [
-            'tenant_id' => 1, // Default tenant
-            'branch_id' => 1, // Default branch
+            'tenant_id' => $tenantId,
+            'branch_id' => $branchId,
             'name' => $validated['name'],
             'description' => $validated['description'] ?? null,
             'is_active' => $validated['is_active'] ?? true,
@@ -71,7 +94,15 @@ class DepartmentController extends Controller
     public function update(Request $request, Department $department): JsonResponse
     {
         $validated = $request->validate([
-            'name' => 'sometimes|required|string|max:255',
+            'name' => [
+                'sometimes',
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('departments', 'name')
+                    ->where(fn ($query) => $query->where('tenant_id', $department->tenant_id))
+                    ->ignore($department->id),
+            ],
             'description' => 'nullable|string',
             'is_active' => 'boolean',
         ]);

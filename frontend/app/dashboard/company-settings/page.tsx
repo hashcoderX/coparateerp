@@ -15,8 +15,21 @@ interface CompanyProfile {
   currency?: string;
   logo_path?: string | null;
   logo_url?: string | null;
+  current_cash_balance?: number;
+  current_bank_balance?: number;
+  current_cheque_balance?: number;
+  bank_accounts?: AccountRow[];
+  cheque_accounts?: AccountRow[];
+  bank_name?: string;
+  bank_account_no?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+interface AccountRow {
+  bank_name: string;
+  account_no: string;
+  current_balance: number;
 }
 
 const PROFILE_ID_KEY = 'company_profile_id';
@@ -34,6 +47,15 @@ export default function CompanySettingsPage() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
+  const [resettingSystem, setResettingSystem] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [resetModalError, setResetModalError] = useState('');
+  const [resetStatusMessage, setResetStatusMessage] = useState('');
+  const [resetStatusType, setResetStatusType] = useState<'success' | 'error' | ''>('');
+  const [showMessageModal, setShowMessageModal] = useState(false);
+  const [messageModalTitle, setMessageModalTitle] = useState('');
+  const [messageModalBody, setMessageModalBody] = useState('');
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -42,6 +64,13 @@ export default function CompanySettingsPage() {
   const [website, setWebsite] = useState('');
   const [country, setCountry] = useState('');
   const [currency, setCurrency] = useState('LKR');
+  const [currentCashBalance, setCurrentCashBalance] = useState('0');
+  const [bankAccounts, setBankAccounts] = useState<Array<{ bank_name: string; account_no: string; current_balance: string }>>([
+    { bank_name: '', account_no: '', current_balance: '0' },
+  ]);
+  const [chequeAccounts, setChequeAccounts] = useState<Array<{ bank_name: string; account_no: string; current_balance: string }>>([
+    { bank_name: '', account_no: '', current_balance: '0' },
+  ]);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState('');
 
@@ -148,9 +177,20 @@ export default function CompanySettingsPage() {
         activeCompany.address,
         activeCompany.country,
         activeCompany.currency,
+        activeCompany.current_cash_balance,
+        activeCompany.current_bank_balance,
+        activeCompany.current_cheque_balance,
+        activeCompany.bank_accounts?.length,
+        activeCompany.cheque_accounts?.length,
       ].filter((value) => Boolean(String(value || '').trim())).length
     : 0;
-  const profileHealth = activeCompany ? Math.round((profileCoverage / 6) * 100) : 0;
+  const profileHealth = activeCompany ? Math.round((profileCoverage / 10) * 100) : 0;
+
+  const formatMoney = (value?: number) =>
+    Number(value || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
 
   const setActiveCompanyProfile = (company: CompanyProfile) => {
     setActiveProfileId(company.id);
@@ -167,6 +207,9 @@ export default function CompanySettingsPage() {
     setWebsite('');
     setCountry('');
     setCurrency('LKR');
+    setCurrentCashBalance('0');
+    setBankAccounts([{ bank_name: '', account_no: '', current_balance: '0' }]);
+    setChequeAccounts([{ bank_name: '', account_no: '', current_balance: '0' }]);
     setLogoFile(null);
     setLogoPreview('');
   };
@@ -185,9 +228,68 @@ export default function CompanySettingsPage() {
     setWebsite(company.website || '');
     setCountry(company.country || '');
     setCurrency(company.currency || 'LKR');
+    setCurrentCashBalance(String(company.current_cash_balance ?? 0));
+
+    const existingBankAccounts = Array.isArray(company.bank_accounts) ? company.bank_accounts : [];
+    const existingChequeAccounts = Array.isArray(company.cheque_accounts) ? company.cheque_accounts : [];
+
+    if (existingBankAccounts.length > 0) {
+      setBankAccounts(
+        existingBankAccounts.map((row) => ({
+          bank_name: row.bank_name || '',
+          account_no: row.account_no || '',
+          current_balance: String(row.current_balance ?? 0),
+        }))
+      );
+    } else {
+      setBankAccounts([
+        {
+          bank_name: company.bank_name || '',
+          account_no: company.bank_account_no || '',
+          current_balance: String(company.current_bank_balance ?? 0),
+        },
+      ]);
+    }
+
+    if (existingChequeAccounts.length > 0) {
+      setChequeAccounts(
+        existingChequeAccounts.map((row) => ({
+          bank_name: row.bank_name || '',
+          account_no: row.account_no || '',
+          current_balance: String(row.current_balance ?? 0),
+        }))
+      );
+    } else {
+      setChequeAccounts([{ bank_name: '', account_no: '', current_balance: String(company.current_cheque_balance ?? 0) }]);
+    }
+
     setLogoFile(null);
     setLogoPreview(company.logo_url || '');
     setShowForm(true);
+  };
+
+  const addBankAccountRow = () => {
+    setBankAccounts((prev) => [...prev, { bank_name: '', account_no: '', current_balance: '0' }]);
+  };
+
+  const addChequeAccountRow = () => {
+    setChequeAccounts((prev) => [...prev, { bank_name: '', account_no: '', current_balance: '0' }]);
+  };
+
+  const removeBankAccountRow = (index: number) => {
+    setBankAccounts((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  };
+
+  const removeChequeAccountRow = (index: number) => {
+    setChequeAccounts((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  };
+
+  const updateBankAccountRow = (index: number, key: 'bank_name' | 'account_no' | 'current_balance', value: string) => {
+    setBankAccounts((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
+  };
+
+  const updateChequeAccountRow = (index: number, key: 'bank_name' | 'account_no' | 'current_balance', value: string) => {
+    setChequeAccounts((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -201,6 +303,26 @@ export default function CompanySettingsPage() {
     if (website.trim()) payload.append('website', website.trim());
     if (country.trim()) payload.append('country', country.trim());
     if (currency.trim()) payload.append('currency', currency.trim());
+    payload.append('current_cash_balance', String(Number(currentCashBalance || 0)));
+
+    const normalizedBankAccounts = bankAccounts
+      .map((row) => ({
+        bank_name: row.bank_name.trim(),
+        account_no: row.account_no.trim(),
+        current_balance: Number(row.current_balance || 0),
+      }))
+      .filter((row) => row.bank_name || row.account_no || row.current_balance > 0);
+
+    const normalizedChequeAccounts = chequeAccounts
+      .map((row) => ({
+        bank_name: row.bank_name.trim(),
+        account_no: row.account_no.trim(),
+        current_balance: Number(row.current_balance || 0),
+      }))
+      .filter((row) => row.bank_name || row.account_no || row.current_balance > 0);
+
+    payload.append('bank_accounts', JSON.stringify(normalizedBankAccounts));
+    payload.append('cheque_accounts', JSON.stringify(normalizedChequeAccounts));
     if (logoFile) payload.append('logo', logoFile);
 
     try {
@@ -222,9 +344,66 @@ export default function CompanySettingsPage() {
       resetForm();
     } catch (error: any) {
       console.error('Error saving company profile:', error);
-      alert(error?.response?.data?.message || 'Failed to save company profile.');
+      setMessageModalTitle('Save Failed');
+      setMessageModalBody(error?.response?.data?.message || 'Failed to save company profile.');
+      setShowMessageModal(true);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleResetSystem = async () => {
+    if (resettingSystem) return;
+
+    setResetModalError('');
+    setResetConfirmText('');
+    setShowResetModal(true);
+  };
+
+  const confirmSystemReset = async () => {
+    if (resettingSystem) return;
+
+    if (resetConfirmText.trim() !== 'RESET') {
+      setResetModalError('Please type RESET exactly to continue.');
+      return;
+    }
+
+    try {
+      setResettingSystem(true);
+      setResetModalError('');
+      setResetStatusMessage('');
+      setResetStatusType('');
+
+      const res = await axios.post(
+        'http://localhost:8000/api/system/reset',
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      const nextToken = String(res?.data?.token || '').trim();
+
+      localStorage.clear();
+      if (nextToken) {
+        localStorage.setItem('token', nextToken);
+        setToken(nextToken);
+      }
+
+      setCompanies([]);
+      setActiveProfileId(null);
+      resetForm();
+      setShowForm(false);
+      setShowResetModal(false);
+      setResetConfirmText('');
+
+      setResetStatusType('success');
+      setResetStatusMessage(res?.data?.message || 'System reset completed successfully.');
+      await fetchCompanies(nextToken || token);
+    } catch (error: any) {
+      console.error('Error resetting system:', error);
+      setResetStatusType('error');
+      setResetStatusMessage(error?.response?.data?.message || 'Failed to reset system.');
+    } finally {
+      setResettingSystem(false);
     }
   };
 
@@ -342,6 +521,51 @@ export default function CompanySettingsPage() {
           </p>
         </section>
 
+        <section className="rounded-2xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-xl p-5 md:p-6">
+          <h3 className="text-sm font-semibold text-gray-900 mb-2">Accounting Overview</h3>
+          {activeCompany ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-gray-700">
+              <div className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white p-4">
+                <p className="text-xs uppercase tracking-wide text-emerald-700 font-semibold">Current Cash Balance</p>
+                <p className="text-2xl font-bold text-emerald-800 mt-1">{formatMoney(activeCompany.current_cash_balance)}</p>
+              </div>
+              <div className="rounded-xl border border-sky-200 bg-gradient-to-r from-sky-50 to-white p-4">
+                <p className="text-xs uppercase tracking-wide text-sky-700 font-semibold">Current Bank Balance</p>
+                <p className="text-2xl font-bold text-sky-800 mt-1">{formatMoney(activeCompany.current_bank_balance)}</p>
+                <p className="mt-1 text-xs text-sky-700">Accounts: {activeCompany.bank_accounts?.length || 0}</p>
+                {activeCompany.bank_accounts && activeCompany.bank_accounts.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {activeCompany.bank_accounts.map((row, index) => (
+                      <p key={`${row.bank_name}-${row.account_no}-${index}`} className="text-xs text-sky-700">
+                        {row.bank_name} - {row.account_no} ({formatMoney(Number(row.current_balance || 0))})
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="rounded-xl border border-violet-200 bg-gradient-to-r from-violet-50 to-white p-4">
+                <p className="text-xs uppercase tracking-wide text-violet-700 font-semibold">Current Cheque Account Balance</p>
+                <p className="text-2xl font-bold text-violet-800 mt-1">{formatMoney(activeCompany.current_cheque_balance)}</p>
+                <p className="mt-1 text-xs text-violet-700">Accounts: {activeCompany.cheque_accounts?.length || 0}</p>
+                {activeCompany.cheque_accounts && activeCompany.cheque_accounts.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {activeCompany.cheque_accounts.map((row, index) => (
+                      <p key={`${row.bank_name}-${row.account_no}-${index}`} className="text-xs text-violet-700">
+                        {row.bank_name} - {row.account_no} ({formatMoney(Number(row.current_balance || 0))})
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No active company profile selected.</p>
+          )}
+          <p className="mt-3 text-xs text-gray-500">
+            These accounting balances are saved in the database with each company profile.
+          </p>
+        </section>
+
         <section className="rounded-2xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-white to-cyan-50">
             <h2 className="text-sm font-semibold text-gray-900">Company Profiles</h2>
@@ -393,56 +617,182 @@ export default function CompanySettingsPage() {
             </div>
           )}
         </section>
+
+        <section className="rounded-2xl border border-red-200 bg-gradient-to-br from-red-50 to-white shadow-xl p-5 md:p-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold text-red-800">Danger Zone</h3>
+              <p className="text-sm text-red-700 mt-1">
+                Reset System will clear application data and keep only the current Super Admin account for login.
+              </p>
+              {resetStatusMessage && (
+                <p
+                  className={`mt-3 text-xs font-medium ${
+                    resetStatusType === 'success' ? 'text-emerald-700' : 'text-red-700'
+                  }`}
+                >
+                  {resetStatusMessage}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleResetSystem}
+              disabled={resettingSystem}
+              className="px-4 py-2 rounded-md text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {resettingSystem ? 'Resetting...' : 'Reset System'}
+            </button>
+          </div>
+        </section>
       </main>
 
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-[2px] p-4">
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-4xl border border-cyan-100 overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-r from-cyan-100/60 via-sky-100/50 to-emerald-100/60 pointer-events-none"></div>
+            <div className="relative px-5 py-4 border-b border-cyan-100/80 flex items-center justify-between shrink-0">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide font-semibold text-cyan-700">Profile Editor</p>
+                <h3 className="text-base font-semibold text-gray-900 mt-0.5">
                 {editingCompanyId ? 'Edit Company Profile' : 'Create Company Profile'}
-              </h3>
+                </h3>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowForm(false)}
-                className="h-7 w-7 rounded-full border border-gray-200 text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                className="h-8 w-8 rounded-full border border-cyan-200 text-cyan-700 hover:text-cyan-800 hover:bg-cyan-50"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleSave} className="p-4 md:p-5 grid grid-cols-1 md:grid-cols-2 gap-3 bg-gradient-to-b from-white to-cyan-50/30">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Company Name</label>
-                <input value={name} onChange={(e) => setName(e.target.value)} required className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Phone</label>
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Country</label>
-                <input value={country} onChange={(e) => setCountry(e.target.value)} className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
-                <input value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Website</label>
-                <input type="url" value={website} onChange={(e) => setWebsite(e.target.value)} className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Address</label>
-                <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
+            <form onSubmit={handleSave} className="relative p-5 md:p-6 grid grid-cols-1 md:grid-cols-2 gap-4 bg-gradient-to-b from-white via-cyan-50/20 to-emerald-50/20 overflow-y-auto overscroll-contain">
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-cyan-200 bg-cyan-50/70 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-cyan-700 font-semibold">Mode</p>
+                  <p className="text-sm font-semibold text-cyan-900">{editingCompanyId ? 'Update Existing' : 'Create New'}</p>
+                </div>
+                <div className="rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold">Bank Accounts</p>
+                  <p className="text-sm font-semibold text-sky-900">{bankAccounts.length}</p>
+                </div>
+                <div className="rounded-xl border border-violet-200 bg-violet-50/70 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-violet-700 font-semibold">Cheque Accounts</p>
+                  <p className="text-sm font-semibold text-violet-900">{chequeAccounts.length}</p>
+                </div>
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Company Logo</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Company Name</label>
+                <input value={name} onChange={(e) => setName(e.target.value)} required className="w-full rounded-lg border border-cyan-200 bg-white text-sm text-black px-3 py-2.5 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Email</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full rounded-lg border border-cyan-200 bg-white text-sm text-black px-3 py-2.5 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Phone</label>
+                <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-lg border border-cyan-200 bg-white text-sm text-black px-3 py-2.5 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Country</label>
+                <input value={country} onChange={(e) => setCountry(e.target.value)} className="w-full rounded-lg border border-cyan-200 bg-white text-sm text-black px-3 py-2.5 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Currency</label>
+                <input value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full rounded-lg border border-cyan-200 bg-white text-sm text-black px-3 py-2.5 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Current Cash Balance</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={currentCashBalance}
+                  onChange={(e) => setCurrentCashBalance(e.target.value)}
+                  className="w-full rounded-lg border border-emerald-200 bg-emerald-50/40 text-sm text-black px-3 py-2.5 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+              </div>
+              <div className="md:col-span-2 rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50/90 to-white p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-sky-800 uppercase tracking-wide">Bank Accounts</label>
+                  <button type="button" onClick={addBankAccountRow} className="text-xs px-3 py-1.5 rounded-md border border-sky-300 bg-white text-sky-700 hover:bg-sky-100">+ Add Bank</button>
+                </div>
+                <div className="space-y-2">
+                  {bankAccounts.map((row, index) => (
+                    <div key={`bank-${index}`} className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white/80 border border-sky-100 rounded-xl p-2.5">
+                      <input
+                        value={row.bank_name}
+                        onChange={(e) => updateBankAccountRow(index, 'bank_name', e.target.value)}
+                        placeholder="Bank name"
+                        className="md:col-span-4 rounded-md border border-sky-200 text-sm text-black px-2.5 py-2 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                      />
+                      <input
+                        value={row.account_no}
+                        onChange={(e) => updateBankAccountRow(index, 'account_no', e.target.value)}
+                        placeholder="Account no"
+                        className="md:col-span-4 rounded-md border border-sky-200 text-sm text-black px-2.5 py-2 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={row.current_balance}
+                        onChange={(e) => updateBankAccountRow(index, 'current_balance', e.target.value)}
+                        placeholder="Balance"
+                        className="md:col-span-3 rounded-md border border-sky-200 text-sm text-black px-2.5 py-2 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                      />
+                      <button type="button" onClick={() => removeBankAccountRow(index)} className="md:col-span-1 rounded-md border border-rose-200 bg-rose-50 text-rose-700 text-xs px-2 py-2 hover:bg-rose-100">Del</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="md:col-span-2 rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50/90 to-white p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-violet-800 uppercase tracking-wide">Cheque Accounts</label>
+                  <button type="button" onClick={addChequeAccountRow} className="text-xs px-3 py-1.5 rounded-md border border-violet-300 bg-white text-violet-700 hover:bg-violet-100">+ Add Cheque</button>
+                </div>
+                <div className="space-y-2">
+                  {chequeAccounts.map((row, index) => (
+                    <div key={`cheque-${index}`} className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white/80 border border-violet-100 rounded-xl p-2.5">
+                      <input
+                        value={row.bank_name}
+                        onChange={(e) => updateChequeAccountRow(index, 'bank_name', e.target.value)}
+                        placeholder="Bank name"
+                        className="md:col-span-4 rounded-md border border-violet-200 text-sm text-black px-2.5 py-2 focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                      />
+                      <input
+                        value={row.account_no}
+                        onChange={(e) => updateChequeAccountRow(index, 'account_no', e.target.value)}
+                        placeholder="Account no"
+                        className="md:col-span-4 rounded-md border border-violet-200 text-sm text-black px-2.5 py-2 focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={row.current_balance}
+                        onChange={(e) => updateChequeAccountRow(index, 'current_balance', e.target.value)}
+                        placeholder="Balance"
+                        className="md:col-span-3 rounded-md border border-violet-200 text-sm text-black px-2.5 py-2 focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                      />
+                      <button type="button" onClick={() => removeChequeAccountRow(index)} className="md:col-span-1 rounded-md border border-rose-200 bg-rose-50 text-rose-700 text-xs px-2 py-2 hover:bg-rose-100">Del</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Website</label>
+                <input type="url" value={website} onChange={(e) => setWebsite(e.target.value)} className="w-full rounded-lg border border-cyan-200 bg-white text-sm text-black px-3 py-2.5 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Address</label>
+                <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} className="w-full rounded-lg border border-cyan-200 bg-white text-sm text-black px-3 py-2.5 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" />
+              </div>
+
+              <div className="md:col-span-2 rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50/70 to-white p-4">
+                <label className="block text-xs font-semibold text-emerald-800 mb-1">Company Logo</label>
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/jpg,image/webp"
@@ -453,23 +803,94 @@ export default function CompanySettingsPage() {
                       setLogoPreview(URL.createObjectURL(file));
                     }
                   }}
-                  className="w-full rounded-md border border-gray-300 text-sm text-black px-2 py-2 file:mr-3 file:rounded file:border-0 file:bg-cyan-100 file:px-2 file:py-1 file:text-cyan-700"
+                  className="w-full rounded-lg border border-emerald-200 text-sm text-black px-2.5 py-2.5 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-100 file:px-2.5 file:py-1.5 file:text-emerald-700"
                 />
                 {logoPreview && (
                   <div className="mt-2">
                     <img src={logoPreview} alt="Logo preview" className="h-16 w-auto object-contain rounded border border-gray-200 bg-white p-1" />
                   </div>
                 )}
-                <p className="mt-1 text-xs text-gray-500">Accepted: JPG, PNG, WEBP. Max size: 2MB.</p>
+                <p className="mt-1 text-xs text-emerald-700">Accepted: JPG, PNG, WEBP. Max size: 2MB.</p>
               </div>
 
-              <div className="md:col-span-2 flex justify-end gap-2 pt-1">
-                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={saving} className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 text-white rounded-md text-sm font-semibold hover:from-emerald-700 hover:to-cyan-700 disabled:opacity-50 shadow-lg shadow-emerald-200/50 transition-all">
+              <div className="md:col-span-2 flex justify-end gap-2 pt-1 sticky bottom-0 bg-gradient-to-t from-white via-white to-transparent pb-1">
+                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 border border-cyan-200 rounded-lg text-sm text-cyan-700 bg-white hover:bg-cyan-50">Cancel</button>
+                <button type="submit" disabled={saving} className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-cyan-600 text-white rounded-lg text-sm font-semibold hover:from-emerald-700 hover:to-cyan-700 disabled:opacity-50 shadow-lg shadow-emerald-200/50 transition-all">
                   {saving ? 'Saving...' : editingCompanyId ? 'Update Profile' : 'Create Profile'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showResetModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white shadow-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-red-100 bg-gradient-to-r from-red-50 to-white">
+              <h3 className="text-sm font-semibold text-red-800">Confirm System Reset</h3>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <p className="text-sm text-gray-700">
+                This action will clear the database and keep only the Super Admin login account.
+              </p>
+              <p className="text-xs text-red-700 font-medium">
+                Type RESET to confirm.
+              </p>
+              <input
+                value={resetConfirmText}
+                onChange={(e) => setResetConfirmText(e.target.value)}
+                placeholder="RESET"
+                className="w-full rounded-md border border-red-200 text-sm text-black px-3 py-2 focus:ring-2 focus:ring-red-500 focus:border-red-500"
+              />
+              {resetModalError && <p className="text-xs text-red-700">{resetModalError}</p>}
+            </div>
+
+            <div className="px-4 py-3 border-t border-gray-100 flex justify-end gap-2 bg-gray-50">
+              <button
+                type="button"
+                onClick={() => {
+                  if (resettingSystem) return;
+                  setShowResetModal(false);
+                  setResetConfirmText('');
+                  setResetModalError('');
+                }}
+                className="px-3 py-2 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmSystemReset}
+                disabled={resettingSystem}
+                className="px-3 py-2 rounded-md text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {resettingSystem ? 'Resetting...' : 'Confirm Reset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMessageModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-red-100 bg-gradient-to-r from-red-50 to-white">
+              <h3 className="text-sm font-semibold text-red-800">{messageModalTitle}</h3>
+            </div>
+            <div className="p-4">
+              <p className="text-sm text-gray-700">{messageModalBody}</p>
+            </div>
+            <div className="px-4 py-3 border-t border-gray-100 flex justify-end bg-gray-50">
+              <button
+                type="button"
+                onClick={() => setShowMessageModal(false)}
+                className="px-3 py-2 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                OK
+              </button>
+            </div>
           </div>
         </div>
       )}

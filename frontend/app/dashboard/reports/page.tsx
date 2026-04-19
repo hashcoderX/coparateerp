@@ -26,6 +26,7 @@ export default function ReportsPage() {
   const [accessReady, setAccessReady] = useState(false);
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [reportPermission, setReportPermission] = useState(false);
+  const [isSalesRefUser, setIsSalesRefUser] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -78,11 +79,16 @@ export default function ReportsPage() {
           roleBlob.includes('admin');
 
         const hasReportPermission = permissionNames.some((permission: string) => permission.includes('report'));
+        const isSalesRef =
+          roleBlob.includes('sales ref') ||
+          roleBlob.includes('sales representative') ||
+          roleBlob.includes('sales_ref');
 
         setIsAdminUser(adminUser);
         setReportPermission(hasReportPermission);
+        setIsSalesRefUser(isSalesRef);
 
-        if (!adminUser && !hasReportPermission) {
+        if (!adminUser && !hasReportPermission && !isSalesRef) {
           router.push('/dashboard');
         }
       } catch (error) {
@@ -154,6 +160,8 @@ export default function ReportsPage() {
           { name: 'Customer Report', description: 'Customer profile and route insights', icon: '👤', path: '/dashboard/reports/distribution/customer' },
           { name: 'Outstanding Report', description: 'Outstanding balances and aging', icon: '⏳', path: '/dashboard/reports/distribution/outstanding' },
           { name: 'Invoice Report', description: 'Invoice summary and trend analysis', icon: '🧾', path: '/dashboard/reports/distribution/invoice' },
+          { name: 'Sales Report', description: 'Sales value by invoice with collection tracking', icon: '📈', path: '/dashboard/reports/distribution/sales' },
+          { name: 'Delivery Balance Sheet', description: 'Delivery-wise net sales, returns and outstanding', icon: '📚', path: '/dashboard/reports/distribution/delivery-balance' },
           { name: 'Collection Report', description: 'Collections by customer and date', icon: '💵', path: '/dashboard/reports/distribution/collection' },
           { name: 'Returns Report', description: 'Product returns and settlement summary', icon: '↩️', path: '/dashboard/reports/distribution/returns' },
           { name: 'Payment History Report', description: 'Payment timeline and mode analytics', icon: '📚', path: '/dashboard/reports/distribution/payment-history' },
@@ -163,7 +171,12 @@ export default function ReportsPage() {
     []
   );
 
-  const totalReports = categories.reduce((sum, category) => sum + category.reports.length, 0);
+  const visibleCategories = useMemo(
+    () => (isSalesRefUser ? categories.filter((category) => category.name === 'Distribution Reports') : categories),
+    [categories, isSalesRefUser]
+  );
+
+  const totalReports = visibleCategories.reduce((sum, category) => sum + category.reports.length, 0);
 
   const handleReportOpen = (report: ReportItem) => {
     if (report.path) {
@@ -184,7 +197,7 @@ export default function ReportsPage() {
     );
   }
 
-  if (!isAdminUser && !reportPermission) {
+  if (!isAdminUser && !reportPermission && !isSalesRefUser) {
     return null;
   }
 
@@ -246,7 +259,7 @@ export default function ReportsPage() {
         </div>
 
         <div className="space-y-8">
-          {categories.map((category) => (
+          {visibleCategories.map((category) => (
             <section key={category.name} className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
               <div className={`bg-gradient-to-r ${category.color} p-5`}>
                 <div className="flex items-center gap-3">

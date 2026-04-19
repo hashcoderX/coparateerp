@@ -86,22 +86,22 @@ export default function OutletsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(251,146,60,0.16),_transparent_24%),radial-gradient(circle_at_top_right,_rgba(245,158,11,0.12),_transparent_28%),linear-gradient(180deg,_#fffaf5_0%,_#fff7ed_42%,_#fff3e4_100%)]">
+      <nav className="border-b border-orange-100 bg-white/85 shadow-sm backdrop-blur-md">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-gradient-to-r from-violet-500 to-purple-500 rounded-lg flex items-center justify-center text-white text-lg">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-lg text-white shadow-md shadow-orange-200">
                 🏪
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-gray-900">Outlets Module</h1>
-                <p className="text-xs text-gray-500">Outlet operations and records</p>
+                <h1 className="text-lg font-semibold text-slate-900">Outlets Module</h1>
+                <p className="text-xs text-slate-500">Outlet operations and records</p>
               </div>
             </div>
             <button
               onClick={() => router.push('/dashboard')}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-full border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:bg-orange-50"
             >
               Back to Dashboard
             </button>
@@ -109,30 +109,30 @@ export default function OutletsPage() {
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="mb-12 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h2 className="text-4xl font-bold text-gray-900 mb-2">Outlets Module</h2>
-            <p className="text-xl text-gray-600 max-w-3xl">
+            <h2 className="text-4xl font-bold tracking-tight text-slate-900 mb-2">Outlets Module</h2>
+            <p className="max-w-3xl text-lg text-slate-600">
               Manage your outlet network with clean CRUD operations and real-time records.
             </p>
           </div>
           <div className="flex gap-3">
             <button
               onClick={() => router.back()}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
               Back
             </button>
             <button
               onClick={() => router.push('/dashboard/outlets/sales')}
-              className="px-4 py-2 border border-indigo-300 rounded-md text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+              className="rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100"
             >
               Outlet Sales Tracking
             </button>
             <button
               onClick={() => router.push('/dashboard')}
-              className="px-4 py-2 bg-violet-600 border border-transparent rounded-md text-sm font-medium text-white hover:bg-violet-700"
+              className="rounded-full border border-transparent bg-gradient-to-r from-orange-600 to-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-orange-700 hover:to-amber-600"
             >
               Dashboard
             </button>
@@ -142,17 +142,17 @@ export default function OutletsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <Link
             href="/dashboard/outlets/management"
-            className="group bg-white rounded-xl shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-200 hover:border-gray-300 overflow-hidden"
+            className="group overflow-hidden rounded-2xl border border-orange-100 bg-white shadow-[0_18px_65px_-35px_rgba(194,65,12,0.42)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_24px_75px_-35px_rgba(194,65,12,0.5)]"
           >
             <div className="p-6">
-              <div className="w-12 h-12 bg-gradient-to-r from-violet-500 to-purple-500 rounded-lg flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform duration-300">
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-2xl shadow-md shadow-orange-200 transition-transform duration-300 group-hover:scale-110">
                 🏪
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Outlets Management</h3>
-              <p className="text-gray-600 text-sm leading-relaxed">
+              <h3 className="mb-2 text-xl font-semibold text-slate-900">Outlets Management</h3>
+              <p className="text-sm leading-relaxed text-slate-600">
                 Create, edit, and delete outlet records from a single management screen.
               </p>
-              <div className="mt-4 flex items-center text-sm text-violet-600 group-hover:text-violet-700">
+              <div className="mt-4 flex items-center text-sm font-semibold text-orange-700 group-hover:text-orange-800">
                 <span>Open Management</span>
                 <svg className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -161,50 +161,58 @@ export default function OutletsPage() {
             </div>
           </Link>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Outlets Overview</h2>
+          <div className="rounded-2xl border border-orange-100 bg-white p-8 shadow-[0_18px_65px_-35px_rgba(194,65,12,0.42)]">
+            <h2 className="mb-4 text-2xl font-bold text-slate-900">Outlets Overview</h2>
             <div className="grid grid-cols-2 gap-6">
-              <div className="text-center">
-                <div className="text-3xl font-bold text-violet-600 mb-2">{outletCount}</div>
-                <div className="text-sm text-gray-600">Total Outlets</div>
+              <div className="rounded-2xl border border-orange-200/70 bg-gradient-to-br from-orange-500 to-amber-500 px-4 py-5 text-center text-white">
+                <div className="mb-2 text-3xl font-bold">{outletCount}</div>
+                <div className="text-xs uppercase tracking-[0.18em] text-white/85">Total Outlets</div>
               </div>
-              <div className="text-center">
-                <div className="text-3xl font-bold text-green-600 mb-2">{activeCount}</div>
-                <div className="text-sm text-gray-600">Active Outlets</div>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-center">
+                <div className="mb-2 text-3xl font-bold text-emerald-700">{activeCount}</div>
+                <div className="text-xs uppercase tracking-[0.18em] text-emerald-700">Active Outlets</div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Outlet Stock Reports</h2>
-          <p className="text-sm text-gray-600 mb-4">Click an outlet to view available outlet stock transferred from central inventory.</p>
+        <div className="mt-8 overflow-hidden rounded-2xl border border-orange-100 bg-white shadow-[0_18px_65px_-35px_rgba(194,65,12,0.42)]">
+          <div className="border-b border-orange-100 bg-gradient-to-r from-slate-900 via-orange-900 to-amber-800 px-6 py-4">
+            <h2 className="text-lg font-semibold text-amber-100">Outlet Stock Reports</h2>
+            <p className="mt-1 text-sm text-amber-100/85">Click an outlet to view available outlet stock transferred from central inventory.</p>
+          </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <div className="p-6">
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-100/80">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Outlet</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Outlet</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Code</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Status</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Action</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-white divide-y divide-slate-200">
                 {outlets.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-sm text-gray-500">No outlets found.</td>
+                    <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-500">No outlets found.</td>
                   </tr>
                 ) : (
                   outlets.map((outlet) => (
-                    <tr key={outlet.id}>
-                      <td className="px-4 py-2 text-sm text-gray-800">{outlet.name}</td>
-                      <td className="px-4 py-2 text-sm text-gray-700">{outlet.code}</td>
-                      <td className="px-4 py-2 text-sm text-gray-700">{outlet.status}</td>
-                      <td className="px-4 py-2 text-right">
+                    <tr key={outlet.id} className="transition hover:bg-orange-50/35">
+                      <td className="px-4 py-3 text-sm font-medium text-slate-800">{outlet.name}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{outlet.code}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${outlet.status === 'active' ? 'border-emerald-200 bg-emerald-100 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-600'}`}>
+                          {outlet.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
                         <button
                           onClick={() => openStockReport(outlet)}
-                          className="px-3 py-1 bg-violet-100 text-violet-700 rounded-md text-sm hover:bg-violet-200"
+                          className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-100"
                         >
                           View Stock Report
                         </button>
@@ -215,60 +223,69 @@ export default function OutletsPage() {
               </tbody>
             </table>
           </div>
+          </div>
         </div>
       </div>
 
       {stockModalOpen && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-5xl overflow-hidden rounded-3xl border border-white/20 bg-white shadow-[0_32px_110px_-45px_rgba(194,65,12,0.6)]">
+            <div className="absolute inset-x-0 top-0 h-36 bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.35),_transparent_48%),linear-gradient(130deg,_rgba(154,52,18,0.95)_0%,_rgba(234,88,12,0.94)_45%,_rgba(249,115,22,0.9)_100%)]"></div>
+            <div className="relative max-h-[90vh] overflow-y-auto px-6 pb-6 pt-7 sm:px-8 sm:pb-8">
+            <div className="mb-5 flex items-start justify-between gap-4 text-white">
+              <div>
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/25 bg-white/10 text-lg">📦</div>
+                <h3 className="text-2xl font-semibold tracking-tight">
                 Outlet Stock Report - {selectedOutlet?.name}
-              </h3>
+                </h3>
+              </div>
               <button
                 onClick={() => {
                   setStockModalOpen(false);
                   setSelectedOutlet(null);
                   setStockLines([]);
                 }}
-                className="text-gray-400 hover:text-gray-600"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
               >
                 <span className="text-2xl">&times;</span>
               </button>
             </div>
 
             {stockLoading ? (
-              <div className="py-8 text-center text-gray-500">Loading stock report...</div>
+              <div className="py-10 text-center text-slate-600">Loading stock report...</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+              <div className="overflow-hidden rounded-2xl border border-orange-100">
+                <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-100/80">
                     <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Available Qty</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Item</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Code</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Unit</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Available Qty</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="bg-white divide-y divide-slate-200">
                     {stockLines.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-500">No stock transferred to this outlet yet.</td>
+                        <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">No stock transferred to this outlet yet.</td>
                       </tr>
                     ) : (
                       stockLines.map((line) => (
-                        <tr key={line.inventory_item_id}>
-                          <td className="px-4 py-2 text-sm text-gray-800">{line.name}</td>
-                          <td className="px-4 py-2 text-sm text-gray-700">{line.code}</td>
-                          <td className="px-4 py-2 text-sm text-gray-700">{line.unit}</td>
-                          <td className="px-4 py-2 text-sm text-gray-900 text-right font-medium">{Number(line.available_quantity).toFixed(2)}</td>
+                        <tr key={line.inventory_item_id} className="transition hover:bg-orange-50/35">
+                          <td className="px-4 py-3 text-sm font-medium text-slate-800">{line.name}</td>
+                          <td className="px-4 py-3 text-sm text-slate-700">{line.code}</td>
+                          <td className="px-4 py-3 text-sm text-slate-700">{line.unit}</td>
+                          <td className="px-4 py-3 text-sm text-slate-900 text-right font-semibold">{Number(line.available_quantity).toFixed(2)}</td>
                         </tr>
                       ))
                     )}
                   </tbody>
                 </table>
               </div>
+              </div>
             )}
+            </div>
           </div>
         </div>
       )}

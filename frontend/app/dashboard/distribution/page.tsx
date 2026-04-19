@@ -170,9 +170,11 @@ export default function DistributionPage() {
     { name: 'Invoices', icon: '🧾', path: '/dashboard/distribution/invoices', stat: invoiceCount, desc: 'Create and track invoices' },
     { name: 'Returns', icon: '↩️', path: '/dashboard/distribution/returns', stat: returnCount, desc: 'Manage customer returns' },
     { name: 'Payments', icon: '💳', path: '/dashboard/distribution/payments', stat: paymentCount, desc: 'Check, cash, and bank transfers' },
+    { name: 'Reports', icon: '📊', path: '/dashboard/reports', stat: 2, desc: 'Sales and delivery balance reports' },
   ];
 
   const getModulePath = (path: string) => {
+    if (path === '/dashboard/reports') return path;
     if (!assignedRouteId) return path;
     return `${path}?route_id=${assignedRouteId}`;
   };
