@@ -49,6 +49,19 @@ interface Leave {
   created_at: string;
 }
 
+const DEFAULT_LEAVE_TYPES: LeaveType[] = [
+  { id: -1, name: 'Annual Leave', code: 'annual', description: 'Annual leave', max_days_per_year: 14, requires_documentation: false, is_active: true },
+  { id: -2, name: 'Sick Leave', code: 'sick', description: 'Sick leave', max_days_per_year: 14, requires_documentation: true, is_active: true },
+  { id: -3, name: 'Casual Leave', code: 'casual', description: 'Casual leave', max_days_per_year: 7, requires_documentation: false, is_active: true },
+  { id: -4, name: 'Maternity Leave', code: 'maternity', description: 'Maternity leave', max_days_per_year: 84, requires_documentation: true, is_active: true },
+  { id: -5, name: 'Paternity Leave', code: 'paternity', description: 'Paternity leave', max_days_per_year: 7, requires_documentation: false, is_active: true },
+  { id: -6, name: 'Unpaid Leave', code: 'unpaid', description: 'Unpaid leave', max_days_per_year: 30, requires_documentation: false, is_active: true },
+  { id: -7, name: 'Religious/Festival Leave', code: 'religious_festival', description: 'Religious / festival leave', max_days_per_year: 5, requires_documentation: false, is_active: true },
+  { id: -8, name: 'Study Leave', code: 'study', description: 'Study leave', max_days_per_year: 10, requires_documentation: true, is_active: true },
+  { id: -9, name: 'Compensatory Leave', code: 'compensatory', description: 'Compensatory leave', max_days_per_year: 5, requires_documentation: false, is_active: true },
+  { id: -10, name: 'Medical / Hospitalization Leave', code: 'medical_hospitalization', description: 'Medical / hospitalization leave', max_days_per_year: 30, requires_documentation: true, is_active: true },
+];
+
 export default function Leaves() {
   const [token, setToken] = useState('');
   const [leaves, setLeaves] = useState<Leave[]>([]);
@@ -124,10 +137,23 @@ export default function Leaves() {
         headers: { Authorization: `Bearer ${tokenToUse}` },
         params: { per_page: 1000 }
       });
-      const typesData = response.data.data || response.data;
-      setLeaveTypes(Array.isArray(typesData) ? typesData : []);
+
+      const payload = response.data;
+      const typesData = Array.isArray(payload)
+        ? payload
+        : (payload?.data?.data || payload?.data || []);
+
+      const normalized = (Array.isArray(typesData) ? typesData : []) as LeaveType[];
+      const apiCodes = new Set(normalized.map((row) => String(row.code || '').toLowerCase()).filter(Boolean));
+      const merged = [
+        ...normalized,
+        ...DEFAULT_LEAVE_TYPES.filter((row) => !apiCodes.has(String(row.code).toLowerCase())),
+      ];
+
+      setLeaveTypes(merged);
     } catch (error) {
       console.error('Error fetching leave types:', error);
+      setLeaveTypes(DEFAULT_LEAVE_TYPES);
     }
   };
 
@@ -176,7 +202,15 @@ export default function Leaves() {
       fetchLeaves();
     } catch (error) {
       console.error('Error saving leave:', error);
-      showNotice('Error', 'Failed to save leave request. Please try again.', 'error');
+      if (axios.isAxiosError(error) && error.response?.status === 422) {
+        const responseData = error.response.data as { message?: string; errors?: Record<string, string[]> };
+        const firstFieldError = responseData?.errors
+          ? Object.values(responseData.errors).flat()[0]
+          : undefined;
+        showNotice('Validation Error', firstFieldError || responseData?.message || 'Please check the form and try again.', 'error');
+      } else {
+        showNotice('Error', 'Failed to save leave request. Please try again.', 'error');
+      }
     }
   };
 
@@ -222,7 +256,6 @@ export default function Leaves() {
       const approvalData = {
         approved: approvalAction === 'approve',
         notes: approvalNotes,
-        approved_by: 1, // TODO: Get current user ID
       };
 
       const endpoint = approvalStage === 'section_head'
@@ -240,7 +273,15 @@ export default function Leaves() {
       fetchLeaves();
     } catch (error) {
       console.error('Error processing approval:', error);
-      showNotice('Error', 'Failed to process approval. Please try again.', 'error');
+      if (axios.isAxiosError(error) && error.response?.status === 422) {
+        const responseData = error.response.data as { message?: string; errors?: Record<string, string[]> };
+        const firstFieldError = responseData?.errors
+          ? Object.values(responseData.errors).flat()[0]
+          : undefined;
+        showNotice('Validation Error', firstFieldError || responseData?.message || 'Unable to process approval with current data.', 'error');
+      } else {
+        showNotice('Error', 'Failed to process approval. Please try again.', 'error');
+      }
     }
   };
 
@@ -633,8 +674,8 @@ export default function Leaves() {
                   >
                     <option value="">Select Leave Type</option>
                     {leaveTypes.map((type) => (
-                      <option key={type.code} value={type.code}>
-                        {type.name}
+                      <option key={type.id} value={type.code}>
+                        {type.name}{type.is_active ? '' : ' (Inactive)'}
                       </option>
                     ))}
                   </select>

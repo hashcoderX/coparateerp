@@ -14,8 +14,20 @@ class LeaveTypeController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $leaveTypes = LeaveType::where('is_active', true)->paginate(15);
-        return response()->json($leaveTypes);
+        $query = LeaveType::query()->orderBy('name');
+
+        if ($request->filled('is_active')) {
+            $isActiveRaw = filter_var($request->query('is_active'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            $query->where('is_active', $isActiveRaw ?? $request->boolean('is_active'));
+        }
+
+        $perPageRaw = $request->query('per_page', 15);
+        if (is_string($perPageRaw) && strtolower($perPageRaw) === 'all') {
+            return response()->json($query->get());
+        }
+
+        $perPage = max(1, min((int) $perPageRaw, 1000));
+        return response()->json($query->paginate($perPage));
     }
 
     /**

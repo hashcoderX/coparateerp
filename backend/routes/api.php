@@ -150,6 +150,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('leave-types', LeaveTypeController::class);
         Route::apiResource('payrolls', PayrollController::class);
         Route::post('payrolls/generate', [PayrollController::class, 'generate']);
+        Route::post('payrolls/recalculate', [PayrollController::class, 'recalculate']);
         Route::get('payrolls/{payroll}/payslip', [PayrollController::class, 'payslip']);
     });
 
