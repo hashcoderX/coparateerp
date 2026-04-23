@@ -11,6 +11,14 @@ type ApprovedQcRow = {
   approved_quantity: number;
   productionOrder?: {
     id: number;
+    batch_no?: string | null;
+    produced_quantity: number;
+    plan?: { order_number?: string | null; plan_date?: string | null; shift?: string | null } | null;
+    product?: { code: string; name: string; unit: string } | null;
+  };
+  production_order?: {
+    id: number;
+    batch_no?: string | null;
     produced_quantity: number;
     plan?: { order_number?: string | null; plan_date?: string | null; shift?: string | null } | null;
     product?: { code: string; name: string; unit: string } | null;
@@ -25,6 +33,9 @@ type PackagingRow = {
   packaging_material_quantity: number;
   packaging_material_unit: string;
   packed_quantity: number;
+  batch_no?: string | null;
+  unit_price?: number | null;
+  expiry_date?: string | null;
   status: 'planned' | 'packed' | 'dispatched';
   label_code: string;
   barcode_value?: string | null;
@@ -32,6 +43,12 @@ type PackagingRow = {
   packed_at?: string | null;
   notes?: string | null;
   productionOrder?: {
+    batch_no?: string | null;
+    plan?: { order_number?: string | null; plan_date?: string | null } | null;
+    product?: { code: string; name: string; unit: string } | null;
+  };
+  production_order?: {
+    batch_no?: string | null;
     plan?: { order_number?: string | null; plan_date?: string | null } | null;
     product?: { code: string; name: string; unit: string } | null;
   };
@@ -66,12 +83,16 @@ export default function PackagingManagementPage() {
   const [materialQty, setMaterialQty] = useState('100');
   const [materialUnit, setMaterialUnit] = useState('pcs');
   const [packedQty, setPackedQty] = useState('0');
+  const [unitPrice, setUnitPrice] = useState('0');
+  const [expiryDate, setExpiryDate] = useState('');
   const [packStatus, setPackStatus] = useState<'planned' | 'packed' | 'dispatched'>('planned');
   const [packNotes, setPackNotes] = useState('');
 
   const [updateRowId, setUpdateRowId] = useState<number>(0);
   const [updateStatus, setUpdateStatus] = useState<'planned' | 'packed' | 'dispatched'>('planned');
   const [updatePackedQty, setUpdatePackedQty] = useState('0');
+  const [updateUnitPrice, setUpdateUnitPrice] = useState('0');
+  const [updateExpiryDate, setUpdateExpiryDate] = useState('');
 
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -84,6 +105,8 @@ export default function PackagingManagementPage() {
     'w-full rounded-xl border border-rose-100 bg-white/95 px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 transition-all duration-200 focus:border-rose-400 focus:ring-4 focus:ring-rose-100 focus:outline-none';
 
   const authHeaders = (authToken: string) => ({ Authorization: `Bearer ${authToken}` });
+
+  const resolveOrder = (row: { productionOrder?: any; production_order?: any }) => row.productionOrder || row.production_order;
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -165,6 +188,8 @@ export default function PackagingManagementPage() {
           packaging_material_quantity: Number(materialQty || 0),
           packaging_material_unit: materialUnit,
           packed_quantity: Number(packedQty || 0),
+          unit_price: Number(unitPrice || 0),
+          expiry_date: expiryDate || null,
           status: packStatus,
           notes: packNotes || null,
         },
@@ -176,6 +201,8 @@ export default function PackagingManagementPage() {
       setMaterialQty('100');
       setMaterialUnit('pcs');
       setPackedQty('0');
+      setUnitPrice('0');
+      setExpiryDate('');
       setPackStatus('planned');
       setPackNotes('');
       setMessage('Packaging batch created successfully. Label, barcode and QR generated.');
@@ -203,6 +230,8 @@ export default function PackagingManagementPage() {
         {
           status: updateStatus,
           packed_quantity: Number(updatePackedQty || 0),
+          unit_price: Number(updateUnitPrice || 0),
+          expiry_date: updateExpiryDate || null,
         },
         { headers: authHeaders(token) }
       );
@@ -226,12 +255,15 @@ export default function PackagingManagementPage() {
 
     const headers = [
       'Batch ID',
+      'Batch No',
       'Order Number',
       'Product Code',
       'Product Name',
       'Packaging Material',
       'Material Qty',
       'Packed Qty',
+      'Unit Price',
+      'Expiry Date',
       'Status',
       'Label Code',
       'Barcode',
@@ -240,21 +272,27 @@ export default function PackagingManagementPage() {
       'Notes',
     ];
 
-    const data = rows.map((row) => [
-      row.id,
-      row.productionOrder?.plan?.order_number || '',
-      row.productionOrder?.product?.code || '',
-      row.productionOrder?.product?.name || '',
-      row.packaging_material_name,
-      `${Number(row.packaging_material_quantity || 0).toFixed(3)} ${row.packaging_material_unit || ''}`,
-      Number(row.packed_quantity || 0).toFixed(3),
-      row.status,
-      row.label_code || '',
-      row.barcode_value || '',
-      row.qr_value || '',
-      row.packed_at || '',
-      row.notes || '',
-    ]);
+    const data = rows.map((row) => {
+      const order = resolveOrder(row);
+      return [
+        row.id,
+        row.batch_no || order?.batch_no || '',
+        order?.plan?.order_number || '',
+        order?.product?.code || '',
+        order?.product?.name || '',
+        row.packaging_material_name,
+        `${Number(row.packaging_material_quantity || 0).toFixed(3)} ${row.packaging_material_unit || ''}`,
+        Number(row.packed_quantity || 0).toFixed(3),
+        Number(row.unit_price || 0).toFixed(2),
+        row.expiry_date || '',
+        row.status,
+        row.label_code || '',
+        row.barcode_value || '',
+        row.qr_value || '',
+        row.packed_at || '',
+        row.notes || '',
+      ];
+    });
 
     const csv = [headers, ...data]
       .map((line) => line.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
@@ -326,9 +364,14 @@ export default function PackagingManagementPage() {
                 <select value={selectedQcId} onChange={(e) => setSelectedQcId(Number(e.target.value))} className={inputClass}>
                   <option value={0}>Select approved QC batch</option>
                   {approvedQc.map((qc) => (
+                    (() => {
+                      const order = resolveOrder(qc);
+                      return (
                     <option key={qc.id} value={qc.id}>
-                      QC #{qc.id} | {qc.productionOrder?.product?.code || '-'} - {qc.productionOrder?.product?.name || '-'} | Approved {Number(qc.approved_quantity || 0).toFixed(3)}
+                      QC #{qc.id} | {order?.batch_no || '-'} | {order?.product?.code || '-'} - {order?.product?.name || '-'} | Approved {Number(qc.approved_quantity || 0).toFixed(3)}
                     </option>
+                      );
+                    })()
                   ))}
                 </select>
               </div>
@@ -347,6 +390,14 @@ export default function PackagingManagementPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Packed Quantity</label>
                 <input type="number" min="0" step="0.001" value={packedQty} onChange={(e) => setPackedQty(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Unit Price (LKR)</label>
+                <input type="number" min="0" step="0.01" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Expiry Date</label>
+                <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} className={inputClass} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Packaging Status</label>
@@ -379,13 +430,20 @@ export default function PackagingManagementPage() {
                     if (row) {
                       setUpdateStatus(row.status);
                       setUpdatePackedQty(String(row.packed_quantity ?? 0));
+                      setUpdateUnitPrice(String(row.unit_price ?? 0));
+                      setUpdateExpiryDate(row.expiry_date ? String(row.expiry_date).slice(0, 10) : '');
                     }
                   }}
                   className={inputClass}
                 >
                   <option value={0}>Select packaging batch</option>
                   {rows.map((row) => (
-                    <option key={row.id} value={row.id}>#{row.id} | {row.productionOrder?.product?.code || '-'} - {row.productionOrder?.product?.name || '-'} | {row.label_code}</option>
+                    (() => {
+                      const order = resolveOrder(row);
+                      return (
+                        <option key={row.id} value={row.id}>#{row.id} | {row.batch_no || order?.batch_no || '-'} | {order?.product?.code || '-'} - {order?.product?.name || '-'} | {row.label_code}</option>
+                      );
+                    })()
                   ))}
                 </select>
               </div>
@@ -400,6 +458,14 @@ export default function PackagingManagementPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Packed Quantity</label>
                 <input type="number" min="0" step="0.001" value={updatePackedQty} onChange={(e) => setUpdatePackedQty(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Unit Price (LKR)</label>
+                <input type="number" min="0" step="0.01" value={updateUnitPrice} onChange={(e) => setUpdateUnitPrice(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Expiry Date</label>
+                <input type="date" value={updateExpiryDate} onChange={(e) => setUpdateExpiryDate(e.target.value)} className={inputClass} />
               </div>
             </div>
 
@@ -445,10 +511,13 @@ export default function PackagingManagementPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Batch No</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Packed Qty</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Unit Price</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Expiry</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Label</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Barcode / QR</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -456,22 +525,28 @@ export default function PackagingManagementPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
                 {rows.length === 0 ? (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500">No packaging batches found.</td></tr>
+                  <tr><td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-500">No packaging batches found.</td></tr>
                 ) : (
-                  rows.map((row) => (
-                    <tr key={row.id} className="hover:bg-rose-50/40 transition-colors">
-                      <td className="px-4 py-2.5 text-sm text-gray-800 font-medium">#{row.id}</td>
-                      <td className="px-4 py-2.5 text-sm text-indigo-700">{row.productionOrder?.plan?.order_number || '-'}</td>
-                      <td className="px-4 py-2.5 text-sm text-gray-700">{row.productionOrder?.product?.code || '-'} - {row.productionOrder?.product?.name || '-'}</td>
-                      <td className="px-4 py-2.5 text-sm text-gray-700">{row.packaging_material_name} ({Number(row.packaging_material_quantity || 0).toFixed(3)} {row.packaging_material_unit})</td>
-                      <td className="px-4 py-2.5 text-sm text-right text-rose-700 font-semibold">{Number(row.packed_quantity || 0).toFixed(3)}</td>
-                      <td className="px-4 py-2.5 text-xs text-gray-700 font-semibold">{row.label_code}</td>
-                      <td className="px-4 py-2.5 text-xs text-gray-600">BAR: {row.barcode_value || '-'}<br />QR: {row.qr_value || '-'}</td>
-                      <td className="px-4 py-2.5 text-sm font-semibold">
-                        <span className={row.status === 'dispatched' ? 'text-indigo-700' : row.status === 'packed' ? 'text-emerald-700' : 'text-slate-700'}>{row.status}</span>
-                      </td>
-                    </tr>
-                  ))
+                  rows.map((row) => {
+                    const order = resolveOrder(row);
+                    return (
+                      <tr key={row.id} className="hover:bg-rose-50/40 transition-colors">
+                        <td className="px-4 py-2.5 text-sm text-gray-800 font-medium">#{row.id}</td>
+                        <td className="px-4 py-2.5 text-xs text-indigo-700 font-semibold">{row.batch_no || order?.batch_no || '-'}</td>
+                        <td className="px-4 py-2.5 text-sm text-indigo-700">{order?.plan?.order_number || '-'}</td>
+                        <td className="px-4 py-2.5 text-sm text-gray-700">{order?.product?.code || '-'} - {order?.product?.name || '-'}</td>
+                        <td className="px-4 py-2.5 text-sm text-gray-700">{row.packaging_material_name} ({Number(row.packaging_material_quantity || 0).toFixed(3)} {row.packaging_material_unit})</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-rose-700 font-semibold">{Number(row.packed_quantity || 0).toFixed(3)}</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-gray-700">LKR {Number(row.unit_price || 0).toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-xs text-gray-700">{row.expiry_date ? String(row.expiry_date).slice(0, 10) : '-'}</td>
+                        <td className="px-4 py-2.5 text-xs text-gray-700 font-semibold">{row.label_code}</td>
+                        <td className="px-4 py-2.5 text-xs text-gray-600">BAR: {row.barcode_value || '-'}<br />QR: {row.qr_value || '-'}</td>
+                        <td className="px-4 py-2.5 text-sm font-semibold">
+                          <span className={row.status === 'dispatched' ? 'text-indigo-700' : row.status === 'packed' ? 'text-emerald-700' : 'text-slate-700'}>{row.status}</span>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

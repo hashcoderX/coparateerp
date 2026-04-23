@@ -26,11 +26,20 @@ interface InventoryItem {
   additional_info?: {
     store_tag?: string;
     stock_source?: string;
+    last_batch_no?: string;
     last_packaging_batch_id?: number;
     last_label_code?: string;
     last_barcode_value?: string;
     last_qr_value?: string;
     last_synced_at?: string;
+    last_batch_unit_price?: number;
+    last_batch_expiry_date?: string;
+    lastPackagingBatchId?: number;
+    lastBatchNo?: string;
+    lastLabelCode?: string;
+    lastBarcodeValue?: string;
+    lastQrValue?: string;
+    lastSyncedAt?: string;
   };
   supplier?: {
     id: number;
@@ -398,6 +407,21 @@ export default function Inventory() {
     return { status: 'In Stock', color: 'bg-green-100 text-green-800' };
   };
 
+  const resolveAdditionalInfo = (item: InventoryItem): Record<string, any> => {
+    const info = item.additional_info;
+    if (!info) return {};
+
+    if (typeof info === 'string') {
+      try {
+        return JSON.parse(info);
+      } catch {
+        return {};
+      }
+    }
+
+    return info as Record<string, any>;
+  };
+
   const modalLabelClass = 'block text-xs font-semibold uppercase tracking-wide text-gray-600';
   const modalInputClass = 'mt-1.5 block w-full rounded-xl border border-orange-100 bg-gradient-to-b from-white to-orange-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 placeholder:text-gray-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
   const modalSelectClass = 'mt-1.5 block w-full rounded-xl border border-orange-100 bg-gradient-to-b from-white to-orange-50/30 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition-all duration-200 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 focus:outline-none';
@@ -636,6 +660,12 @@ export default function Inventory() {
                   {items.map((item) => {
                     const stockStatus = getStockStatus(item);
                     const resolvedPrice = resolveItemPrice(item);
+                    const info = resolveAdditionalInfo(item);
+                    const batchNo = info.last_batch_no || info.lastBatchNo || '';
+                    const labelCode = info.last_label_code || info.lastLabelCode || '';
+                    const storeTag = info.store_tag || info.storeTag || '';
+                    const stockSource = info.stock_source || info.stockSource || '';
+                    const packagingBatchId = info.last_packaging_batch_id || info.lastPackagingBatchId;
                     return (
                       <tr
                         key={item.id}
@@ -676,24 +706,27 @@ export default function Inventory() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
-                            {item.additional_info?.last_label_code || '-'}
+                            {batchNo || labelCode || (packagingBatchId ? `Batch #${packagingBatchId}` : '-')}
                           </div>
                           <div className="mt-1 flex items-center gap-2">
-                            {item.additional_info?.store_tag && (
+                            {storeTag && (
                               <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-                                {item.additional_info.store_tag.replace('_', ' ').toUpperCase()}
+                                {String(storeTag).replace('_', ' ').toUpperCase()}
                               </span>
                             )}
-                            {item.additional_info?.stock_source && (
+                            {stockSource && (
                               <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-purple-100 text-purple-800">
-                                {item.additional_info.stock_source.toUpperCase()}
+                                {String(stockSource).toUpperCase()}
                               </span>
                             )}
                           </div>
-                          {item.additional_info?.last_packaging_batch_id && (
+                          {packagingBatchId && (
                             <div className="text-xs text-gray-500 mt-1">
-                              Batch #{item.additional_info.last_packaging_batch_id}
+                              Batch #{packagingBatchId}
                             </div>
+                          )}
+                          {activeTab === 'finished_good' && !labelCode && !packagingBatchId && (
+                            <div className="text-xs text-amber-600 mt-1">Not synced from packaging yet</div>
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-800">

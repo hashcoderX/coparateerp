@@ -102,6 +102,7 @@ interface PendingOfflineInvoice {
       amount: number;
       method: 'cash' | 'check' | 'bank_transfer' | 'bill_to_bill';
       date: string;
+      cheque_date?: string | null;
       reference?: string | null;
       bank_name?: string | null;
       target_invoice_id?: number | null;
@@ -212,6 +213,7 @@ export default function DistributionInvoicesPage() {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [lastBillAmount, setLastBillAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentChequeDate, setPaymentChequeDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentBankName, setPaymentBankName] = useState('');
 
@@ -516,7 +518,7 @@ export default function DistributionInvoicesPage() {
         const inv = entry.payload;
         try {
           const invoiceRes = await axios.post('http://localhost:8000/api/distribution/invoices', {
-            load_id: inv.load_id ?? (activeLoadId ? Number(activeLoadId) : null),
+            load_id: inv.load_id ?? (activeLoadId ? Number(activeLoadId) : (isAdmin && selectedLoadFilter ? Number(selectedLoadFilter) : null)),
             invoice_number: inv.invoice_number,
             customer_id: inv.customer_id,
             invoice_date: inv.invoice_date,
@@ -541,8 +543,10 @@ export default function DistributionInvoicesPage() {
               await axios.post('http://localhost:8000/api/distribution/payments', {
                 payment_number: generatePaymentNumber(),
                 distribution_invoice_id: targetInvoiceId,
+                load_id: createdInvoice.load_id ?? inv.load_id ?? (activeLoadId ? Number(activeLoadId) : (isAdmin && selectedLoadFilter ? Number(selectedLoadFilter) : null)),
                 customer_id: createdInvoice.customer_id ?? inv.customer_id,
                 payment_date: inv.payment.date,
+                cheque_date: inv.payment.method === 'check' ? (inv.payment.cheque_date || null) : null,
                 amount: inv.payment.amount,
                 payment_method: inv.payment.method === 'bill_to_bill' ? 'cash' : inv.payment.method,
                 reference_no: inv.payment.reference || null,
@@ -1156,6 +1160,7 @@ export default function DistributionInvoicesPage() {
     setPaymentAmount('');
     setLastBillAmount('');
     setPaymentDate(new Date().toISOString().split( 'T')[0]);
+    setPaymentChequeDate(new Date().toISOString().split('T')[0]);
     setPaymentReference('');
     setPaymentBankName('');
   };
@@ -1214,6 +1219,7 @@ export default function DistributionInvoicesPage() {
     setPaymentAmount('');
     setLastBillAmount('');
     setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentChequeDate(new Date().toISOString().split('T')[0]);
     setPaymentReference('');
     setPaymentBankName('');
 
@@ -1330,6 +1336,8 @@ export default function DistributionInvoicesPage() {
   const submitInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     const isEditing = editingInvoiceId !== null;
+    const selectedLoadId = activeLoadId || (isAdmin ? selectedLoadFilter : '');
+    const effectiveLoadId = selectedLoadId ? Number(selectedLoadId) : null;
     const billToBillAmount = Number(lastBillAmount || 0);
     const hasBillToBillSettlement = addPayment && paymentMethod === 'bill_to_bill' && billToBillAmount > 0;
     if (!customerId || lines.length === 0) {
@@ -1348,6 +1356,12 @@ export default function DistributionInvoicesPage() {
       const amt = Number(paymentAmount);
       if (!amt || amt <= 0) {
         setQtyWarningMessage('Enter a valid payment amount.');
+        setQtyWarningOpen(true);
+        return;
+      }
+
+      if (paymentMethod === 'check' && !paymentChequeDate) {
+        setQtyWarningMessage('Select cheque date for cheque payments.');
         setQtyWarningOpen(true);
         return;
       }
@@ -1452,6 +1466,12 @@ export default function DistributionInvoicesPage() {
               parts.push(`Payment mode: ${String(paymentMethod || '').toUpperCase()}`);
               parts.push(`Amount paid: ${normalAmount.toFixed(2)}`);
               parts.push(`Payment date: ${paymentDate || invoiceDate}`);
+              if (paymentMethod === 'check' && paymentChequeDate) {
+                parts.push(`Cheque date: ${paymentChequeDate}`);
+              }
+              if (paymentBankName.trim()) {
+                parts.push(`Bank: ${paymentBankName.trim()}`);
+              }
               if (paymentReference.trim()) {
                 parts.push(`Reference: ${paymentReference.trim()}`);
               }
@@ -1499,7 +1519,7 @@ export default function DistributionInvoicesPage() {
     });
 
     const baseInvoicePayload = {
-      load_id: activeLoadId ? Number(activeLoadId) : null,
+      load_id: effectiveLoadId,
       invoice_number: invoiceNumber,
       customer_id: Number(customerId),
       invoice_date: invoiceDate,
@@ -1522,6 +1542,7 @@ export default function DistributionInvoicesPage() {
           amount: billToBillAmount,
           method: paymentMethod,
           date: paymentDate || invoiceDate,
+          cheque_date: null,
           reference: paymentReference || null,
           bank_name: paymentBankName || null,
           target_invoice_id: Number(targetLastInvoice?.id || 0),
@@ -1532,6 +1553,7 @@ export default function DistributionInvoicesPage() {
         amount: Number(paymentAmount),
         method: paymentMethod,
         date: paymentDate || invoiceDate,
+        cheque_date: paymentMethod === 'check' ? (paymentChequeDate || null) : null,
         reference: paymentReference || null,
         bank_name: paymentBankName || null,
         target_invoice_id: null,
@@ -1657,8 +1679,10 @@ export default function DistributionInvoicesPage() {
           await axios.post('http://localhost:8000/api/distribution/payments', {
             payment_number: generatePaymentNumber(),
             distribution_invoice_id: targetInvoiceId,
+            load_id: savedInvoice.load_id ?? effectiveLoadId,
             customer_id: savedInvoice.customer_id ?? Number(customerId),
             payment_date: paymentPayload.date,
+            cheque_date: paymentPayload.method === 'check' ? (paymentPayload.cheque_date || null) : null,
             amount: paymentPayload.amount,
             payment_method: paymentPayload.method === 'bill_to_bill' ? 'cash' : paymentPayload.method,
             reference_no: paymentPayload.reference || null,
@@ -3162,6 +3186,7 @@ export default function DistributionInvoicesPage() {
                               setPaymentAmount(invoiceFinalTotal.toFixed(2));
                             }
                             setPaymentDate(invoiceDate);
+                            setPaymentChequeDate(invoiceDate);
                           }
                         }}
                       />
@@ -3187,6 +3212,11 @@ export default function DistributionInvoicesPage() {
                               } else if (addPayment) {
                                 setPaymentAmount(invoiceFinalTotal.toFixed(2));
                               }
+                              if (nextMethod !== 'check') {
+                                setPaymentChequeDate('');
+                              } else if (!paymentChequeDate) {
+                                setPaymentChequeDate(paymentDate || invoiceDate);
+                              }
                             }}
                             className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
                           >
@@ -3206,6 +3236,18 @@ export default function DistributionInvoicesPage() {
                             required={addPayment}
                           />
                         </div>
+                        {paymentMethod === 'check' && (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Cheque Date</label>
+                            <input
+                              type="date"
+                              value={paymentChequeDate}
+                              onChange={(e) => setPaymentChequeDate(e.target.value)}
+                              className="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
+                              required={addPayment}
+                            />
+                          </div>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

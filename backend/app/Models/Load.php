@@ -51,4 +51,9 @@ class Load extends Model
     {
         return $this->hasMany(LoadItem::class);
     }
+
+    public function loadExpenses(): HasMany
+    {
+        return $this->hasMany(LoadExpense::class);
+    }
 }

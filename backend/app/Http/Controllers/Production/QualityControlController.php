@@ -13,7 +13,7 @@ class QualityControlController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = QcInspection::with([
-            'productionOrder:id,product_id,production_quantity,produced_quantity,wastage_quantity,status,started_at,completed_at',
+            'productionOrder:id,product_id,batch_no,production_quantity,produced_quantity,wastage_quantity,status,started_at,completed_at',
             'productionOrder.product:id,name,code,unit',
             'productionOrder.plan:id,order_number,plan_date,shift',
         ]);
@@ -110,7 +110,7 @@ class QualityControlController extends Controller
             'rejection_reason' => $request->rejection_reason,
             'report_notes' => $request->report_notes,
         ])->load([
-            'productionOrder:id,product_id,production_quantity,produced_quantity,wastage_quantity,status,started_at,completed_at',
+            'productionOrder:id,product_id,batch_no,production_quantity,produced_quantity,wastage_quantity,status,started_at,completed_at',
             'productionOrder.product:id,name,code,unit',
             'productionOrder.plan:id,order_number,plan_date,shift',
         ]);
@@ -171,7 +171,7 @@ class QualityControlController extends Controller
         return response()->json([
             'success' => true,
             'data' => $inspection->fresh([
-                'productionOrder:id,product_id,production_quantity,produced_quantity,wastage_quantity,status,started_at,completed_at',
+                'productionOrder:id,product_id,batch_no,production_quantity,produced_quantity,wastage_quantity,status,started_at,completed_at',
                 'productionOrder.product:id,name,code,unit',
                 'productionOrder.plan:id,order_number,plan_date,shift',
             ]),

@@ -96,7 +96,7 @@ type MainJournalRow = JournalEntry & {
 };
 
 type JournalUiRow = MainJournalRow & {
-  txMark: 'Transfer In' | 'Transfer Out' | 'Pending Receipt' | 'Withdrawal' | 'Transfer';
+  txMark: 'Transfer In' | 'Transfer Out' | 'Pending Receipt' | 'Withdrawal' | 'Transfer' | 'Cheque Deposit' | 'Cheque Return';
   accountMark: 'Cash' | 'Bank' | 'Cheque' | 'Mixed';
   runningBalance: number;
   balanceLabel: string;
@@ -201,6 +201,10 @@ export default function MainAccountPage() {
     const ref = String(reference || '').toLowerCase();
     const narration = String(note || '').toLowerCase();
 
+    if (ref.startsWith('chq-')) {
+      return ref.startsWith('chq-ret-') ? 'withdrawal' : 'transfer';
+    }
+
     if (ref.startsWith('trf-') || narration.includes('transfer')) {
       return 'transfer';
     }
@@ -264,6 +268,7 @@ export default function MainAccountPage() {
   };
 
   const getTxMark = (entry: MainJournalRow): JournalUiRow['txMark'] => {
+    const reference = String(entry.reference || '').toLowerCase();
     const narration = String(entry.note || '').toLowerCase();
 
     if (entry.status === 'pending' && entry.row_source === 'outlet_request') {
@@ -272,6 +277,19 @@ export default function MainAccountPage() {
 
     if (entry.entry_type === 'withdrawal') {
       return 'Withdrawal';
+    }
+
+    if (reference.startsWith('chq-ret-') || narration.includes('cheque return')) {
+      return 'Cheque Return';
+    }
+
+    if (
+      reference.startsWith('chq-dep-') ||
+      reference.startsWith('chq-endclr-') ||
+      narration.includes('cheque deposit') ||
+      narration.includes('end cheque clearance')
+    ) {
+      return 'Cheque Deposit';
     }
 
     if (narration.includes('transfer received') || String(entry.source_account || '').toLowerCase().includes('outlet')) {
@@ -321,6 +339,11 @@ export default function MainAccountPage() {
       const match = field.match(/Bank\s*-\s*([^,\.\n]+)/i);
       if (match?.[1]) {
         return `Bank - ${match[1].trim()}`;
+      }
+
+      const alt = field.match(/Bank\s*:\s*([^|,\.\n]+)/i);
+      if (alt?.[1]) {
+        return `Bank - ${alt[1].trim()}`;
       }
     }
 
@@ -587,10 +610,10 @@ export default function MainAccountPage() {
       if (entry.status !== 'pending' && affectsMainCash(entry)) {
         const amount = Number(entry.amount || 0);
 
-        if (mapped.txMark === 'Transfer In') {
+        if (mapped.txMark === 'Transfer In' || mapped.txMark === 'Cheque Deposit') {
           // Reverse of increase when walking backward in time.
           currentBalance -= amount;
-        } else if (mapped.txMark === 'Transfer Out' || mapped.txMark === 'Withdrawal') {
+        } else if (mapped.txMark === 'Transfer Out' || mapped.txMark === 'Withdrawal' || mapped.txMark === 'Cheque Return') {
           // Reverse of decrease when walking backward in time.
           currentBalance += amount;
         }
@@ -599,9 +622,9 @@ export default function MainAccountPage() {
       if (entry.status !== 'pending' && bankLabel) {
         const amount = Number(entry.amount || 0);
 
-        if (mapped.txMark === 'Transfer In') {
+        if (mapped.txMark === 'Transfer In' || mapped.txMark === 'Cheque Deposit') {
           bankBalances[bankLabel] = Number(bankBalances[bankLabel] || 0) - amount;
-        } else if (mapped.txMark === 'Transfer Out' || mapped.txMark === 'Withdrawal') {
+        } else if (mapped.txMark === 'Transfer Out' || mapped.txMark === 'Withdrawal' || mapped.txMark === 'Cheque Return') {
           bankBalances[bankLabel] = Number(bankBalances[bankLabel] || 0) + amount;
         }
       }
@@ -1623,6 +1646,8 @@ export default function MainAccountPage() {
                 <option value="all">All Tx Marks</option>
                 <option value="Transfer In">Transfer In</option>
                 <option value="Transfer Out">Transfer Out</option>
+                <option value="Cheque Deposit">Cheque Deposit</option>
+                <option value="Cheque Return">Cheque Return</option>
                 <option value="Pending Receipt">Pending Receipt</option>
                 <option value="Withdrawal">Withdrawal</option>
                 <option value="Transfer">Transfer</option>
@@ -1727,6 +1752,10 @@ export default function MainAccountPage() {
                                 ? 'bg-emerald-100 text-emerald-700'
                                 : entry.txMark === 'Transfer Out'
                                   ? 'bg-rose-100 text-rose-700'
+                                  : entry.txMark === 'Cheque Deposit'
+                                    ? 'bg-cyan-100 text-cyan-700'
+                                    : entry.txMark === 'Cheque Return'
+                                      ? 'bg-orange-100 text-orange-700'
                                   : entry.txMark === 'Pending Receipt'
                                     ? 'bg-amber-100 text-amber-700'
                                     : entry.txMark === 'Withdrawal'

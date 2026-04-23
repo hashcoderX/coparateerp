@@ -43,6 +43,31 @@ type PlanSummary = {
   scheduled_or_order_created: number;
 };
 
+type QuickFilterKey = 'all' | 'today' | 'this_week' | 'pending_orders';
+
+const toDateInput = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getWeekRange = (): { start: string; end: string } => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = today.getDay();
+  const diffFromMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - diffFromMonday);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  return {
+    start: toDateInput(monday),
+    end: toDateInput(sunday),
+  };
+};
+
 const parseList = (payload: any): any[] => {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.data)) return payload.data;
@@ -54,7 +79,9 @@ export default function ProductionPlanningPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [creatingOrderPlanId, setCreatingOrderPlanId] = useState<number | null>(null);
   const [message, setMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   const [products, setProducts] = useState<Product[]>([]);
   const [boms, setBoms] = useState<Bom[]>([]);
@@ -69,6 +96,12 @@ export default function ProductionPlanningPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [quickFilter, setQuickFilter] = useState<QuickFilterKey>('all');
+
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; plan: ProductionPlan | null }>({
+    open: false,
+    plan: null,
+  });
 
   const [planProductId, setPlanProductId] = useState<number>(0);
   const [planBomId, setPlanBomId] = useState<number>(0);
@@ -129,6 +162,7 @@ export default function ProductionPlanningPage() {
     try {
       setLoading(true);
       setMessage('');
+      setErrorMessage('');
       await Promise.all([loadMasterData(authToken), loadPlans(authToken)]);
     } catch (error: any) {
       console.error('Failed to load production planning data:', error);
@@ -137,7 +171,7 @@ export default function ProductionPlanningPage() {
         router.push('/');
         return;
       }
-      setMessage(error?.response?.data?.message || 'Failed to load planning data.');
+      setErrorMessage(error?.response?.data?.message || 'Failed to load planning data.');
     } finally {
       setLoading(false);
     }
@@ -160,8 +194,26 @@ export default function ProductionPlanningPage() {
 
   const createPlan = async () => {
     if (!token) return;
+    setMessage('');
+    setErrorMessage('');
+
     if (!planProductId) {
-      alert('Please select a product for plan creation.');
+      setErrorMessage('Please select a finished product before saving the plan.');
+      return;
+    }
+
+    if (!planDate) {
+      setErrorMessage('Please select the production date.');
+      return;
+    }
+
+    if (Number(planTargetQuantity || 0) <= 0) {
+      setErrorMessage('Target quantity must be greater than 0.');
+      return;
+    }
+
+    if (Number(planBatchCount || 0) <= 0) {
+      setErrorMessage('Batch count must be greater than 0.');
       return;
     }
 
@@ -192,11 +244,12 @@ export default function ProductionPlanningPage() {
       setPlanPriority('medium');
       setPlanNotes('');
       setMessage('Production plan created successfully.');
+      setErrorMessage('');
       await loadAll(token);
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to create production plan.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
     } finally {
       setSaving(false);
     }
@@ -205,22 +258,94 @@ export default function ProductionPlanningPage() {
   const createOrder = async (planId: number) => {
     if (!token) return;
     try {
+      setCreatingOrderPlanId(planId);
+      setMessage('');
+      setErrorMessage('');
       await axios.post(`${API_URL}/api/production/plans/${planId}/create-order`, {}, { headers: authHeaders(token) });
       setMessage('Production order created from selected plan.');
       await loadPlans(token);
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to create production order.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
+    } finally {
+      setCreatingOrderPlanId(null);
+    }
+  };
+
+  const openCreateOrderConfirm = (plan: ProductionPlan) => {
+    setConfirmModal({ open: true, plan });
+  };
+
+  const closeCreateOrderConfirm = () => {
+    setConfirmModal({ open: false, plan: null });
+  };
+
+  const confirmCreateOrder = async () => {
+    if (!confirmModal.plan) return;
+    const planId = confirmModal.plan.id;
+    closeCreateOrderConfirm();
+    await createOrder(planId);
+  };
+
+  const applyQuickFilter = async (key: QuickFilterKey) => {
+    const today = toDateInput(new Date());
+    const weekRange = getWeekRange();
+
+    setQuickFilter(key);
+    if (key === 'all') {
+      setFromDate('');
+      setToDate('');
+      setStatusFilter('');
+    } else if (key === 'today') {
+      setFromDate(today);
+      setToDate(today);
+      setStatusFilter('');
+    } else if (key === 'this_week') {
+      setFromDate(weekRange.start);
+      setToDate(weekRange.end);
+      setStatusFilter('');
+    } else if (key === 'pending_orders') {
+      setFromDate('');
+      setToDate('');
+      setStatusFilter('scheduled');
+    }
+
+    if (!token) return;
+
+    try {
+      setMessage('');
+      setErrorMessage('');
+      await axios.get(`${API_URL}/api/production/plans`, {
+        headers: authHeaders(token),
+        params: {
+          from_date: key === 'today' ? today : key === 'this_week' ? weekRange.start : undefined,
+          to_date: key === 'today' ? today : key === 'this_week' ? weekRange.end : undefined,
+          status: key === 'pending_orders' ? 'scheduled' : undefined,
+          per_page: 200,
+        },
+      }).then((res) => {
+        setPlans(res.data?.data?.data || []);
+        setSummary(res.data?.data?.summary || {
+          total_plans: 0,
+          today_plans: 0,
+          total_target_quantity: 0,
+          scheduled_or_order_created: 0,
+        });
+      });
+    } catch (error: any) {
+      setErrorMessage(error?.response?.data?.message || 'Failed to apply quick filter.');
     }
   };
 
   const applyFilters = async () => {
     if (!token) return;
     try {
+      setMessage('');
+      setErrorMessage('');
       await loadPlans(token);
     } catch (error: any) {
-      setMessage(error?.response?.data?.message || 'Failed to apply filters.');
+      setErrorMessage(error?.response?.data?.message || 'Failed to apply filters.');
     }
   };
 
@@ -237,6 +362,14 @@ export default function ProductionPlanningPage() {
     if (status === 'cancelled') return 'bg-red-100 text-red-700 border-red-200';
     return 'bg-gray-100 text-gray-700 border-gray-200';
   };
+
+  const priorityBadgeClass = (priority: ProductionPlan['priority']) => {
+    if (priority === 'high') return 'bg-rose-100 text-rose-700 border-rose-200';
+    if (priority === 'medium') return 'bg-amber-100 text-amber-700 border-amber-200';
+    return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+  };
+
+  const readableStatus = (status: ProductionPlan['status']) => status.replace('_', ' ');
 
   if (loading) {
     return (
@@ -280,7 +413,13 @@ export default function ProductionPlanningPage() {
       </nav>
 
       <main className="relative z-10 max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-6">
+        <section className="rounded-xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-800 shadow-sm">
+          <p className="font-semibold">Recommended flow</p>
+          <p className="mt-1">1) Filter and review existing plans, 2) Create a new production plan, 3) Verify today&apos;s queue, 4) Create production order when ready.</p>
+        </section>
+
         {message && <div className="rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-700">{message}</div>}
+        {errorMessage && <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{errorMessage}</div>}
 
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           <div className="rounded-xl border border-white/60 bg-white/85 backdrop-blur-lg p-4 shadow-sm">
@@ -303,6 +442,53 @@ export default function ProductionPlanningPage() {
 
         <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Production Schedule Filters</h2>
+          <p className="text-xs text-gray-500 mb-4">Use date range and status together to quickly find missing or pending plans.</p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => applyQuickFilter('all')}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                quickFilter === 'all'
+                  ? 'border-cyan-300 bg-cyan-100 text-cyan-800'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              All Plans
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQuickFilter('today')}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                quickFilter === 'today'
+                  ? 'border-cyan-300 bg-cyan-100 text-cyan-800'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQuickFilter('this_week')}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                quickFilter === 'this_week'
+                  ? 'border-cyan-300 bg-cyan-100 text-cyan-800'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              This Week
+            </button>
+            <button
+              type="button"
+              onClick={() => applyQuickFilter('pending_orders')}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                quickFilter === 'pending_orders'
+                  ? 'border-cyan-300 bg-cyan-100 text-cyan-800'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Pending Orders
+            </button>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">From Date</label>
@@ -333,10 +519,19 @@ export default function ProductionPlanningPage() {
             </button>
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
+                setQuickFilter('all');
                 setFromDate('');
                 setToDate('');
                 setStatusFilter('');
+                if (!token) return;
+                try {
+                  setMessage('');
+                  setErrorMessage('');
+                  await loadPlans(token);
+                } catch (error: any) {
+                  setErrorMessage(error?.response?.data?.message || 'Failed to clear filters.');
+                }
               }}
               className="h-[42px] px-4 py-2 border border-gray-300 bg-white text-gray-700 rounded-md text-sm font-medium hover:bg-gray-50"
             >
@@ -348,6 +543,9 @@ export default function ProductionPlanningPage() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Create Daily Production Plan</h2>
+            <div className="mb-4 rounded-md border border-cyan-100 bg-cyan-50/70 px-3 py-2 text-xs text-cyan-800">
+              Select product first, then optionally pick BOM version. Keep target and batches greater than zero.
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Finished Product</label>
@@ -406,7 +604,7 @@ export default function ProductionPlanningPage() {
               onClick={createPlan}
               className="mt-4 px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-md text-sm font-medium hover:from-cyan-700 hover:to-blue-700 disabled:opacity-50"
             >
-              Save Production Plan
+              {saving ? 'Saving Plan...' : 'Save Production Plan'}
             </button>
           </section>
 
@@ -421,12 +619,18 @@ export default function ProductionPlanningPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-sm font-semibold text-gray-800">{plan.product?.code || '-'} - {plan.product?.name || '-'}</div>
                       <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(plan.status)}`}>
-                        {plan.status}
+                        {readableStatus(plan.status)}
                       </span>
                     </div>
-                    <div className="text-xs text-gray-600 mt-1">Target: {Number(plan.target_quantity || 0).toFixed(3)} | Shift: {plan.shift || '-'}</div>
-                    <div className="text-xs text-gray-600">Batches: {Number(plan.batch_count || 0).toFixed(2)} | Priority: {plan.priority}</div>
+                    <div className="text-xs text-gray-600 mt-1">Date: {String(plan.plan_date).slice(0, 10)} | Shift: {plan.shift || '-'}</div>
+                    <div className="text-xs text-gray-600">Target: {Number(plan.target_quantity || 0).toFixed(3)} | Batches: {Number(plan.batch_count || 0).toFixed(2)}</div>
+                    <div className="mt-1">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${priorityBadgeClass(plan.priority)}`}>
+                        {plan.priority} priority
+                      </span>
+                    </div>
                     {plan.order_number && <div className="text-xs text-indigo-700 font-medium mt-1">Order: {plan.order_number}</div>}
+                    {plan.notes && <div className="text-xs text-gray-500 mt-1">Note: {plan.notes}</div>}
                   </div>
                 ))
               )}
@@ -446,6 +650,8 @@ export default function ProductionPlanningPage() {
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Target</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Batches</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Shift</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order #</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
@@ -453,7 +659,7 @@ export default function ProductionPlanningPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
                 {plans.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">No production plans found.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500">No production plans found.</td></tr>
                 ) : (
                   plans.map((plan) => (
                     <tr key={plan.id} className="hover:bg-cyan-50/40 transition-colors">
@@ -461,20 +667,26 @@ export default function ProductionPlanningPage() {
                       <td className="px-4 py-2.5 text-sm text-gray-800 font-medium">{plan.product?.code || '-'} - {plan.product?.name || '-'}</td>
                       <td className="px-4 py-2.5 text-sm text-right text-gray-700">{Number(plan.target_quantity || 0).toFixed(3)}</td>
                       <td className="px-4 py-2.5 text-sm text-right text-gray-700">{Number(plan.batch_count || 0).toFixed(2)}</td>
+                      <td className="px-4 py-2.5 text-sm text-gray-700">{plan.shift || '-'}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${priorityBadgeClass(plan.priority)}`}>
+                          {plan.priority}
+                        </span>
+                      </td>
                       <td className="px-4 py-2.5">
                         <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(plan.status)}`}>
-                          {plan.status}
+                          {readableStatus(plan.status)}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-sm text-indigo-700 font-medium">{plan.order_number || '-'}</td>
                       <td className="px-4 py-2.5 text-right">
                         <button
                           type="button"
-                          onClick={() => createOrder(plan.id)}
-                          disabled={Boolean(plan.order_number)}
+                          onClick={() => openCreateOrderConfirm(plan)}
+                          disabled={Boolean(plan.order_number) || creatingOrderPlanId === plan.id}
                           className="px-3 py-1.5 rounded-md text-xs font-medium border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
                         >
-                          {plan.order_number ? 'Order Created' : 'Create Order'}
+                          {plan.order_number ? 'Order Created' : creatingOrderPlanId === plan.id ? 'Creating...' : 'Create Order'}
                         </button>
                       </td>
                     </tr>
@@ -485,6 +697,36 @@ export default function ProductionPlanningPage() {
           </div>
         </section>
       </main>
+
+      {confirmModal.open && confirmModal.plan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/70 bg-white/95 p-5 shadow-2xl">
+            <h3 className="text-lg font-semibold text-gray-900">Create Production Order</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Create order for {confirmModal.plan.product?.code || '-'} - {confirmModal.plan.product?.name || '-'} on {String(confirmModal.plan.plan_date).slice(0, 10)}?
+            </p>
+            <div className="mt-3 rounded-md border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs text-cyan-800">
+              Target: {Number(confirmModal.plan.target_quantity || 0).toFixed(3)} | Batches: {Number(confirmModal.plan.batch_count || 0).toFixed(2)}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeCreateOrderConfirm}
+                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmCreateOrder}
+                className="rounded-md bg-gradient-to-r from-indigo-600 to-blue-600 px-3 py-2 text-sm font-medium text-white hover:from-indigo-700 hover:to-blue-700"
+              >
+                Confirm Create Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

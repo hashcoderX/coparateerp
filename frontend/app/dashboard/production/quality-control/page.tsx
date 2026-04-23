@@ -7,6 +7,7 @@ import axios from 'axios';
 
 type BatchRow = {
   id: number;
+  batch_no?: string | null;
   status: 'completed' | 'cancelled' | 'started';
   production_quantity: number;
   produced_quantity: number;
@@ -35,6 +36,7 @@ type QcInspection = {
   rejection_reason?: string | null;
   report_notes?: string | null;
   productionOrder?: BatchRow;
+  production_order?: BatchRow;
 };
 
 type QcSummary = {
@@ -88,6 +90,30 @@ export default function QualityControlPage() {
     'w-full rounded-xl border border-violet-100 bg-white/95 px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 transition-all duration-200 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 focus:outline-none';
 
   const authHeaders = (authToken: string) => ({ Authorization: `Bearer ${authToken}` });
+
+  const formatInspectionDate = (value?: string | null) => {
+    if (!value) return '-';
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+
+    const hasTime = String(value).includes('T') || /\d{2}:\d{2}/.test(String(value));
+    if (hasTime) {
+      return parsed.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+
+    return parsed.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    });
+  };
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -215,6 +241,7 @@ export default function QualityControlPage() {
 
     const headers = [
       'Inspection ID',
+      'Batch No',
       'Date',
       'Inspector',
       'Order Number',
@@ -232,24 +259,29 @@ export default function QualityControlPage() {
       'Notes',
     ];
 
-    const rows = qcRows.map((row) => [
-      row.id,
-      row.inspection_date,
-      row.inspector_name,
-      row.productionOrder?.plan?.order_number || '',
-      row.productionOrder?.product?.code || '',
-      row.productionOrder?.product?.name || '',
-      row.quality_status,
-      Number(row.approved_quantity || 0).toFixed(3),
-      Number(row.rejected_quantity || 0).toFixed(3),
-      row.food_safety_checklist?.temperature_check ? 'Yes' : 'No',
-      row.food_safety_checklist?.hygiene_check ? 'Yes' : 'No',
-      row.food_safety_checklist?.packaging_check ? 'Yes' : 'No',
-      row.food_safety_checklist?.label_check ? 'Yes' : 'No',
-      row.defects_notes || '',
-      row.rejection_reason || '',
-      row.report_notes || '',
-    ]);
+    const rows = qcRows.map((row) => {
+      const productionOrder = row.productionOrder || row.production_order;
+
+      return [
+        row.id,
+        productionOrder?.batch_no || '',
+        row.inspection_date,
+        row.inspector_name,
+        productionOrder?.plan?.order_number || '',
+        productionOrder?.product?.code || '',
+        productionOrder?.product?.name || '',
+        row.quality_status,
+        Number(row.approved_quantity || 0).toFixed(3),
+        Number(row.rejected_quantity || 0).toFixed(3),
+        row.food_safety_checklist?.temperature_check ? 'Yes' : 'No',
+        row.food_safety_checklist?.hygiene_check ? 'Yes' : 'No',
+        row.food_safety_checklist?.packaging_check ? 'Yes' : 'No',
+        row.food_safety_checklist?.label_check ? 'Yes' : 'No',
+        row.defects_notes || '',
+        row.rejection_reason || '',
+        row.report_notes || '',
+      ];
+    });
 
     const csv = [headers, ...rows]
       .map((line) => line.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
@@ -417,6 +449,7 @@ export default function QualityControlPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Batch No</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Inspector</th>
@@ -428,27 +461,32 @@ export default function QualityControlPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
                 {qcRows.length === 0 ? (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500">No QC records found.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500">No QC records found.</td></tr>
                 ) : (
-                  qcRows.map((row) => (
-                    <tr key={row.id} className="hover:bg-violet-50/40 transition-colors">
-                      <td className="px-4 py-2.5 text-sm text-gray-700">{row.inspection_date}</td>
-                      <td className="px-4 py-2.5 text-sm text-indigo-700">{row.productionOrder?.plan?.order_number || '-'}</td>
-                      <td className="px-4 py-2.5 text-sm text-gray-700">{row.productionOrder?.product?.code || '-'} - {row.productionOrder?.product?.name || '-'}</td>
-                      <td className="px-4 py-2.5 text-sm text-gray-700">{row.inspector_name}</td>
-                      <td className="px-4 py-2.5 text-sm text-right text-emerald-700 font-medium">{Number(row.approved_quantity || 0).toFixed(3)}</td>
-                      <td className="px-4 py-2.5 text-sm text-right text-red-700 font-medium">{Number(row.rejected_quantity || 0).toFixed(3)}</td>
-                      <td className="px-4 py-2.5 text-sm font-semibold">
-                        <span className={row.quality_status === 'approved' ? 'text-emerald-700' : row.quality_status === 'rejected' ? 'text-red-700' : 'text-amber-700'}>{row.quality_status}</span>
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-gray-600">
-                        T:{row.food_safety_checklist?.temperature_check ? 'Y' : 'N'} |
-                        H:{row.food_safety_checklist?.hygiene_check ? 'Y' : 'N'} |
-                        P:{row.food_safety_checklist?.packaging_check ? 'Y' : 'N'} |
-                        L:{row.food_safety_checklist?.label_check ? 'Y' : 'N'}
-                      </td>
-                    </tr>
-                  ))
+                  qcRows.map((row) => {
+                    const productionOrder = row.productionOrder || row.production_order;
+
+                    return (
+                      <tr key={row.id} className="hover:bg-violet-50/40 transition-colors">
+                        <td className="px-4 py-2.5 text-sm text-gray-700" title={row.inspection_date}>{formatInspectionDate(row.inspection_date)}</td>
+                        <td className="px-4 py-2.5 text-xs text-indigo-700 font-semibold">{productionOrder?.batch_no || '-'}</td>
+                        <td className="px-4 py-2.5 text-sm text-indigo-700">{productionOrder?.plan?.order_number || '-'}</td>
+                        <td className="px-4 py-2.5 text-sm text-gray-700">{productionOrder?.product?.code || '-'} - {productionOrder?.product?.name || '-'}</td>
+                        <td className="px-4 py-2.5 text-sm text-gray-700">{row.inspector_name}</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-emerald-700 font-medium">{Number(row.approved_quantity || 0).toFixed(3)}</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-red-700 font-medium">{Number(row.rejected_quantity || 0).toFixed(3)}</td>
+                        <td className="px-4 py-2.5 text-sm font-semibold">
+                          <span className={row.quality_status === 'approved' ? 'text-emerald-700' : row.quality_status === 'rejected' ? 'text-red-700' : 'text-amber-700'}>{row.quality_status}</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-gray-600">
+                          T:{row.food_safety_checklist?.temperature_check ? 'Y' : 'N'} |
+                          H:{row.food_safety_checklist?.hygiene_check ? 'Y' : 'N'} |
+                          P:{row.food_safety_checklist?.packaging_check ? 'Y' : 'N'} |
+                          L:{row.food_safety_checklist?.label_check ? 'Y' : 'N'}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

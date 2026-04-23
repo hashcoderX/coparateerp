@@ -68,6 +68,8 @@ type CalculationResult = {
   requirements: RequirementRow[];
 };
 
+type StepKey = 'step1' | 'step2' | 'step3' | 'step4' | 'step5';
+
 const toNumber = (value: string, fallback = 0): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -115,6 +117,7 @@ export default function BomPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   const [products, setProducts] = useState<Product[]>([]);
   const [inventoryRawItems, setInventoryRawItems] = useState<InventoryItem[]>([]);
@@ -129,6 +132,8 @@ export default function BomPage() {
   const [newProductDescription, setNewProductDescription] = useState('');
 
   const [selectedInventoryMaterialId, setSelectedInventoryMaterialId] = useState<number>(0);
+  const [step2Message, setStep2Message] = useState('');
+  const [step2Error, setStep2Error] = useState('');
 
   const [bomProductId, setBomProductId] = useState<number>(0);
   const [bomVersion, setBomVersion] = useState('v1');
@@ -142,6 +147,7 @@ export default function BomPage() {
   const [productionQty, setProductionQty] = useState('1');
   const [calculation, setCalculation] = useState<CalculationResult | null>(null);
   const [startingProduction, setStartingProduction] = useState(false);
+  const [activeStep, setActiveStep] = useState<StepKey>('step1');
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
@@ -163,6 +169,7 @@ export default function BomPage() {
     try {
       setLoading(true);
       setMessage('');
+      setErrorMessage('');
 
       const [productsRes, rawRes, bomsRes, stockRes] = await Promise.all([
         axios.get(`${API_URL}/api/production/products`, { headers: authHeaders(authToken) }),
@@ -185,7 +192,7 @@ export default function BomPage() {
         router.push('/');
         return;
       }
-      setMessage(error?.response?.data?.message || 'Failed to load BOM data.');
+      setErrorMessage(error?.response?.data?.message || 'Failed to load BOM data.');
     } finally {
       setLoading(false);
     }
@@ -197,6 +204,22 @@ export default function BomPage() {
   }, [token]);
 
   const selectedBom = useMemo(() => boms.find((bom) => bom.id === selectedBomId) || null, [boms, selectedBomId]);
+  const selectedBomItems = useMemo(() => {
+    const items = (selectedBom as any)?.items;
+    return Array.isArray(items) ? items : [];
+  }, [selectedBom]);
+  const hasShortage = useMemo(
+    () => Boolean(calculation?.requirements?.some((row) => Number(row.shortage) > 0)),
+    [calculation]
+  );
+
+  const stepTabs: Array<{ key: StepKey; label: string }> = [
+    { key: 'step1', label: 'Step 1: Product' },
+    { key: 'step2', label: 'Step 2: Raw Materials' },
+    { key: 'step3', label: 'Step 3: BOM Recipe' },
+    { key: 'step4', label: 'Step 4: Review BOM' },
+    { key: 'step5', label: 'Step 5: Calculator' },
+  ];
 
   useEffect(() => {
     if (!productCodeAutoMode) return;
@@ -224,12 +247,13 @@ export default function BomPage() {
   const handleCreateProduct = async () => {
     if (!token) return;
     if (!newProductName.trim() || !newProductCode.trim()) {
-      alert('Product name and code are required.');
+      setErrorMessage('Product name and code are required.');
       return;
     }
 
     try {
       setSaving(true);
+      setErrorMessage('');
       await axios.post(
         `${API_URL}/api/production/products`,
         {
@@ -249,11 +273,12 @@ export default function BomPage() {
       setNewProductBatchSize('1');
       setNewProductDescription('');
       setMessage('Finished product created successfully.');
+      setErrorMessage('');
       await loadData(token);
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to create product.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
     } finally {
       setSaving(false);
     }
@@ -262,12 +287,17 @@ export default function BomPage() {
   const handleAddRawMaterial = async () => {
     if (!token) return;
     if (!selectedInventoryMaterialId) {
-      alert('Please select a raw material from inventory.');
+      setErrorMessage('Please select a raw material from inventory.');
+      setStep2Error('Please select a raw material from inventory.');
+      setStep2Message('');
       return;
     }
 
     try {
       setSaving(true);
+      setErrorMessage('');
+      setStep2Error('');
+      setStep2Message('');
       await axios.post(
         `${API_URL}/api/production/raw-materials`,
         { inventory_item_id: selectedInventoryMaterialId },
@@ -275,11 +305,16 @@ export default function BomPage() {
       );
       setSelectedInventoryMaterialId(0);
       setMessage('Raw material added for BOM usage.');
+      setErrorMessage('');
+      setStep2Message('Raw material added successfully.');
+      setStep2Error('');
       await loadData(token);
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to add raw material.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
+      setStep2Error(firstError?.[0] || apiMessage);
+      setStep2Message('');
     } finally {
       setSaving(false);
     }
@@ -288,7 +323,7 @@ export default function BomPage() {
   const handleCreateBom = async () => {
     if (!token) return;
     if (!bomProductId) {
-      alert('Please select product.');
+      setErrorMessage('Please select a finished product before creating BOM.');
       return;
     }
 
@@ -301,12 +336,13 @@ export default function BomPage() {
       }));
 
     if (payloadLines.length === 0) {
-      alert('Add at least one BOM material line.');
+      setErrorMessage('Add at least one BOM material line with quantity.');
       return;
     }
 
     try {
       setSaving(true);
+      setErrorMessage('');
       await axios.post(
         `${API_URL}/api/production/boms`,
         {
@@ -324,11 +360,12 @@ export default function BomPage() {
       setBomNotes('');
       setBomLines([{ material_id: 0, quantity: '1', unit: '' }]);
       setMessage('BOM recipe created successfully.');
+      setErrorMessage('');
       await loadData(token);
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to create BOM.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
     } finally {
       setSaving(false);
     }
@@ -336,11 +373,12 @@ export default function BomPage() {
 
   const handleCalculateRequirements = async () => {
     if (!token || !selectedBomId) {
-      alert('Select a BOM first.');
+      setErrorMessage('Select a BOM first, then calculate requirements.');
       return;
     }
 
     try {
+      setErrorMessage('');
       const res = await axios.post(
         `${API_URL}/api/production/boms/calculate-materials`,
         {
@@ -351,21 +389,33 @@ export default function BomPage() {
       );
 
       setCalculation(res.data?.data || null);
+      setMessage('Material requirement calculation completed.');
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to calculate requirements.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
     }
   };
 
   const handleStartProduction = async () => {
     if (!token || !selectedBomId) {
-      alert('Select a BOM first.');
+      setErrorMessage('Select a BOM first.');
+      return;
+    }
+
+    if (!calculation) {
+      setErrorMessage('Calculate material requirements before starting production.');
+      return;
+    }
+
+    if (hasShortage) {
+      setErrorMessage('Cannot start production while shortages exist. Resolve shortages first.');
       return;
     }
 
     try {
       setStartingProduction(true);
+      setErrorMessage('');
       await axios.post(
         `${API_URL}/api/production/orders/start`,
         {
@@ -376,12 +426,13 @@ export default function BomPage() {
         { headers: authHeaders(token) }
       );
       setMessage('Production started and materials deducted from raw material inventory.');
+      setErrorMessage('');
       setCalculation(null);
       await loadData(token);
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to start production.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
     } finally {
       setStartingProduction(false);
     }
@@ -434,8 +485,35 @@ export default function BomPage() {
       </nav>
 
       <main className="relative z-10 max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-6">
+        <section className="rounded-xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-800 shadow-sm">
+          <p className="font-semibold">Recommended workflow</p>
+          <p className="mt-1">1) Create product, 2) Add raw materials, 3) Create BOM recipe, 4) Select BOM and calculate, 5) Start production.</p>
+        </section>
+
+        <section className="rounded-xl border border-white/70 bg-white/90 px-3 py-3 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {stepTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveStep(tab.key)}
+                className={`rounded-lg px-3 py-2 text-xs sm:text-sm font-medium transition ${
+                  activeStep === tab.key
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
         {message && (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div>
+        )}
+        {errorMessage && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{errorMessage}</div>
         )}
 
         <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -457,9 +535,10 @@ export default function BomPage() {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Create Finished Product</h2>
+        <div className={`grid grid-cols-1 gap-6 ${activeStep === 'step1' || activeStep === 'step2' ? '' : 'hidden'}`}>
+          <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5 ${activeStep === 'step1' ? '' : 'hidden'}`}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Step 1: Create Finished Product</h2>
+            <p className="text-xs text-gray-500 mb-4">Define the product you manufacture before mapping BOM ingredients.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Finished Product Name</label>
@@ -515,8 +594,9 @@ export default function BomPage() {
             </button>
           </section>
 
-          <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Manage Raw Materials</h2>
+          <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5 ${activeStep === 'step2' ? '' : 'hidden'}`}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Step 2: Add Raw Materials</h2>
+            <p className="text-xs text-gray-500 mb-4">Choose inventory items you want available for BOM lines.</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Select From Inventory (Raw Materials)</label>
@@ -542,6 +622,17 @@ export default function BomPage() {
                 Add Ingredient
               </button>
             </div>
+
+            {step2Message && (
+              <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                {step2Message}
+              </div>
+            )}
+            {step2Error && (
+              <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                {step2Error}
+              </div>
+            )}
 
             <div className="mt-4 max-h-48 overflow-auto rounded-md border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
@@ -571,8 +662,9 @@ export default function BomPage() {
           </section>
         </div>
 
-        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Create BOM Recipe</h2>
+        <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5 ${activeStep === 'step3' ? '' : 'hidden'}`}>
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Step 3: Create BOM Recipe</h2>
+          <p className="text-xs text-gray-500 mb-4">Set recipe version, base batch size, and ingredient quantities per batch.</p>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Finished Product</label>
@@ -632,7 +724,12 @@ export default function BomPage() {
                   <input value={line.unit} onChange={(e) => updateBomLine(idx, { unit: e.target.value })} className={inputClass} placeholder="kg" />
                 </div>
                 <div className="md:col-span-1">
-                  <button type="button" onClick={() => removeBomLine(idx)} className="w-full h-[42px] rounded-md border border-red-200 bg-red-50 text-red-700 text-sm hover:bg-red-100">
+                  <button
+                    type="button"
+                    disabled={bomLines.length === 1}
+                    onClick={() => removeBomLine(idx)}
+                    className="w-full h-[42px] rounded-md border border-red-200 bg-red-50 text-red-700 text-sm hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
                     Remove
                   </button>
                 </div>
@@ -650,9 +747,10 @@ export default function BomPage() {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">View BOM Details</h2>
+        <div className={`grid grid-cols-1 gap-6 ${activeStep === 'step4' || activeStep === 'step5' ? '' : 'hidden'}`}>
+          <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5 ${activeStep === 'step4' ? '' : 'hidden'}`}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Step 4: Select and Review BOM</h2>
+            <p className="text-xs text-gray-500 mb-4">Choose the recipe you want to calculate and run for production.</p>
             <label className="block text-xs font-medium text-gray-600 mb-1">BOM Recipe</label>
             <select value={selectedBomId} onChange={(e) => { setSelectedBomId(Number(e.target.value)); setCalculation(null); }} className={inputClass}>
               <option value={0}>Select BOM</option>
@@ -672,23 +770,31 @@ export default function BomPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
-                  {!selectedBom || selectedBom.items.length === 0 ? (
+                  {!selectedBom ? (
                     <tr><td colSpan={2} className="px-3 py-4 text-center text-sm text-gray-500">No BOM selected.</td></tr>
+                  ) : selectedBomItems.length === 0 ? (
+                    <tr><td colSpan={2} className="px-3 py-4 text-center text-sm text-gray-500">No ingredients found for this BOM.</td></tr>
                   ) : (
-                    selectedBom.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="px-3 py-2 text-sm text-gray-800">{item.material?.inventoryItem?.code || '-'} - {item.material?.inventoryItem?.name || '-'}</td>
-                        <td className="px-3 py-2 text-sm text-right text-gray-700">{Number(item.quantity || 0).toFixed(4)} {item.unit}</td>
-                      </tr>
-                    ))
+                    selectedBomItems.map((item) => {
+                      const material = item.material || rawMaterials.find((mat) => mat.id === Number(item.material_id));
+                      const inv = material?.inventoryItem || material?.inventory_item;
+
+                      return (
+                        <tr key={item.id}>
+                          <td className="px-3 py-2 text-sm text-gray-800">{inv?.code || `MAT-${item.material_id}`} - {inv?.name || 'Unknown Material'}</td>
+                          <td className="px-3 py-2 text-sm text-right text-gray-700">{Number(item.quantity || 0).toFixed(4)} {item.unit || inv?.unit || ''}</td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </section>
 
-          <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Batch Production Calculator</h2>
+          <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5 ${activeStep === 'step5' ? '' : 'hidden'}`}>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Step 5: Batch Production Calculator</h2>
+            <p className="text-xs text-gray-500 mb-4">Calculate required materials first, then start production only when shortages are zero.</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Target Production Quantity</label>
@@ -703,6 +809,11 @@ export default function BomPage() {
               <div className="mt-4 space-y-3">
                 <div className="text-sm text-gray-700">
                   Multiplier: <span className="font-semibold">{Number(calculation.multiplier || 0).toFixed(4)}</span> | Batch Size: <span className="font-semibold">{Number(calculation.batch_size || 0).toFixed(3)}</span>
+                </div>
+                <div className={`rounded-md border px-3 py-2 text-xs ${hasShortage ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                  {hasShortage
+                    ? 'Shortages detected. Start Production is disabled until shortages are resolved.'
+                    : 'No shortages detected. You can proceed to start production.'}
                 </div>
                 <div className="overflow-x-auto border border-gray-200 rounded-md">
                   <table className="min-w-full divide-y divide-gray-200">
@@ -731,17 +842,18 @@ export default function BomPage() {
 
                 <button
                   type="button"
-                  disabled={startingProduction}
+                  disabled={startingProduction || hasShortage}
                   onClick={handleStartProduction}
                   className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-md text-sm font-medium hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50"
                 >
-                  {startingProduction ? 'Starting...' : 'Start Production (Deduct Materials)'}
+                  {startingProduction ? 'Starting...' : hasShortage ? 'Resolve Shortages to Start' : 'Start Production (Deduct Materials)'}
                 </button>
               </div>
             )}
           </section>
         </div>
       </main>
+
     </div>
   );
 }

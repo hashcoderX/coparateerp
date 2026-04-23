@@ -193,14 +193,7 @@ export default function AccountsPage() {
       balance: companySummary.totalCheque,
       color: 'from-fuchsia-500 to-rose-500',
     },
-    {
-      title: 'Transaction Book',
-      icon: '📘',
-      href: '/dashboard/accounts/cash-book',
-      desc: 'Unified transaction ledger for cash, bank, cheque, petty, delivery, returns, and withdrawals.',
-      balance: cashBookBalance,
-      color: 'from-sky-500 to-cyan-500',
-    },
+    
     {
       title: 'Petty Cash Account',
       icon: '🧾',

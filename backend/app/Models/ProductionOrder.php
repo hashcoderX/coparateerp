@@ -12,6 +12,7 @@ class ProductionOrder extends Model
 
     protected $fillable = [
         'production_plan_id',
+        'batch_no',
         'product_id',
         'bom_id',
         'production_quantity',

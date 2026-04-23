@@ -199,6 +199,25 @@ interface LoadCustomerBaseRow {
   balance: number;
 }
 
+interface DeliveryCashTransactionRecord {
+  id: number | string;
+  date: string;
+  type: 'in' | 'out';
+  amount: number;
+  reference?: string | null;
+  note?: string | null;
+}
+
+interface LoadExpenseRecord {
+  id: number | string;
+  load_id: number;
+  expense_date: string;
+  expense_type: string;
+  amount: number;
+  reference?: string | null;
+  note?: string | null;
+}
+
 const PAGE_SIZE = 10;
 
 export default function LoadsPage() {
@@ -224,6 +243,17 @@ export default function LoadsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | Load['status']>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [deliverySummary, setDeliverySummary] = useState<LoadDeliverySummary | null>(null);
+  const [deliveryCashBalance, setDeliveryCashBalance] = useState(0);
+  const [loadExpenses, setLoadExpenses] = useState<LoadExpenseRecord[]>([]);
+  const [expenseSaving, setExpenseSaving] = useState(false);
+  const [expenseError, setExpenseError] = useState('');
+  const [expenseSuccess, setExpenseSuccess] = useState('');
+  const [expenseForm, setExpenseForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    category: 'fuel',
+    amount: '',
+    note: ''
+  });
   const [formData, setFormData] = useState({
     load_number: '',
     vehicle_id: '',
@@ -231,7 +261,6 @@ export default function LoadsPage() {
     sales_ref_id: '',
     route_id: '',
     load_date: '',
-    total_weight: '',
     notes: ''
   });
   const router = useRouter();
@@ -298,6 +327,78 @@ export default function LoadsPage() {
       .sort((a, b) => b.total_sale - a.total_sale);
   }, [loadInvoices, loadPayments]);
 
+  const toDeliveryCashRows = (payload: any): DeliveryCashTransactionRecord[] => {
+    const rows = Array.isArray(payload)
+      ? payload
+      : (payload?.data?.data || payload?.data || []);
+
+    if (!Array.isArray(rows)) return [];
+
+    return rows.map((row: any) => ({
+      id: row.id,
+      date: String(row.date || ''),
+      type: row.type === 'in' ? 'in' : 'out',
+      amount: Number(row.amount || 0),
+      reference: row.reference ?? null,
+      note: row.note ?? null,
+    }));
+  };
+
+  const toLoadExpenseRows = (payload: any): LoadExpenseRecord[] => {
+    const rows = Array.isArray(payload)
+      ? payload
+      : (payload?.data || []);
+
+    if (!Array.isArray(rows)) return [];
+
+    return rows.map((row: any) => ({
+      id: row.id,
+      load_id: Number(row.load_id || 0),
+      expense_date: String(row.expense_date || ''),
+      expense_type: String(row.expense_type || 'other'),
+      amount: Number(row.amount || 0),
+      reference: row.reference ?? null,
+      note: row.note ?? null,
+    }));
+  };
+
+  const calculateDeliveryCashBalance = (transactions: DeliveryCashTransactionRecord[]) => {
+    return transactions.reduce((sum, tx) => {
+      const amount = Number(tx.amount || 0);
+      return tx.type === 'in' ? sum + amount : sum - amount;
+    }, 0);
+  };
+
+  const formatExpenseCategory = (value?: string | null) => {
+    const raw = String(value || '').trim();
+    if (!raw) return 'Other';
+    return raw
+      .split('_')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  };
+
+  const refreshDeliveryCashForLoad = async (loadId?: number) => {
+    const response = await axios.get('http://localhost:8000/api/delivery-cash-transactions', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      params: { per_page: 1000 },
+    });
+
+    const allTransactions = toDeliveryCashRows(response.data);
+    setDeliveryCashBalance(calculateDeliveryCashBalance(allTransactions));
+
+    if (loadId) {
+      const expensesRes = await axios.get(`http://localhost:8000/api/vehicle-loading/loads/${loadId}/expenses`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      setLoadExpenses(toLoadExpenseRows(expensesRes.data));
+    }
+  };
+
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
     if (!storedToken) {
@@ -313,6 +414,9 @@ export default function LoadsPage() {
       fetchVehicles();
       fetchDrivers();
       fetchRoutes();
+      refreshDeliveryCashForLoad().catch((error) => {
+        console.error('Error fetching delivery cash transactions:', error);
+      });
     }
   }, [token]);
 
@@ -397,7 +501,6 @@ export default function LoadsPage() {
         sales_ref_id: formData.sales_ref_id ? parseInt(formData.sales_ref_id) : null,
         route_id: parseInt(formData.route_id),
         load_date: formData.load_date,
-        total_weight: parseFloat(formData.total_weight),
         notes: formData.notes
       };
 
@@ -432,7 +535,6 @@ export default function LoadsPage() {
       sales_ref_id: '',
       route_id: '',
       load_date: '',
-      total_weight: '',
       notes: ''
     });
   };
@@ -465,7 +567,6 @@ export default function LoadsPage() {
       sales_ref_id: load.sales_ref_id ? load.sales_ref_id.toString() : '',
       route_id: load.route_id.toString(),
       load_date: load.load_date,
-      total_weight: load.total_weight.toString(),
       notes: load.notes
     });
     setShowModal(true);
@@ -611,7 +712,16 @@ export default function LoadsPage() {
       setSoldItemProfitRows([]);
       setLoadInvoices([]);
       setLoadPayments([]);
+      setLoadExpenses([]);
       setDeliverySummary(null);
+      setExpenseError('');
+      setExpenseSuccess('');
+      setExpenseForm({
+        date: new Date().toISOString().split('T')[0],
+        category: 'fuel',
+        amount: '',
+        note: ''
+      });
 
       const [loadRes, itemsRes, summaryRes, invoicesRes, paymentsRes] = await Promise.all([
         axios.get(`http://localhost:8000/api/vehicle-loading/loads/${loadId}`, {
@@ -658,6 +768,7 @@ export default function LoadsPage() {
 
       const soldProfit = computeSoldItemsProfit(loadItems, loadInvoices);
       setSoldItemProfitRows(soldProfit.rows);
+      await refreshDeliveryCashForLoad(loadId);
 
       if (summaryRes && summaryRes.data && summaryRes.data.data) {
         setDeliverySummary(summaryRes.data.data as LoadDeliverySummary);
@@ -668,6 +779,58 @@ export default function LoadsPage() {
       setShowDetailsModal(false);
     } finally {
       setDetailsLoading(false);
+    }
+  };
+
+  const handleAddLoadExpense = async () => {
+    if (!selectedLoadDetails) return;
+
+    const amount = Number(expenseForm.amount || 0);
+    if (!expenseForm.date || Number.isNaN(amount) || amount <= 0) {
+      setExpenseError('Enter a valid date and expense amount.');
+      setExpenseSuccess('');
+      return;
+    }
+
+    if (amount > deliveryCashBalance) {
+      setExpenseError('Insufficient delivery cash balance for this expense.');
+      setExpenseSuccess('');
+      return;
+    }
+
+    const trimmedNote = expenseForm.note.trim();
+    const payloadNote = trimmedNote || `Payment for ${expenseForm.category.replace('_', ' ')}`;
+
+    try {
+      setExpenseSaving(true);
+      setExpenseError('');
+      setExpenseSuccess('');
+
+      await axios.post(`http://localhost:8000/api/vehicle-loading/loads/${selectedLoadDetails.id}/expenses`, {
+        expense_date: expenseForm.date,
+        expense_type: expenseForm.category,
+        amount,
+        reference: `LDEX-${selectedLoadDetails.id}-${Date.now()}`,
+        note: payloadNote,
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      await refreshDeliveryCashForLoad(selectedLoadDetails.id);
+      setExpenseForm((prev) => ({
+        ...prev,
+        amount: '',
+        note: ''
+      }));
+      setExpenseSuccess('Load expense recorded and deducted from delivery cash account.');
+    } catch (error) {
+      console.error('Error adding load expense:', error);
+      setExpenseError('Failed to record load expense.');
+      setExpenseSuccess('');
+    } finally {
+      setExpenseSaving(false);
     }
   };
 
@@ -979,6 +1142,12 @@ export default function LoadsPage() {
                     >
                       View
                     </button>
+                    <button
+                      onClick={() => handleViewDetails(load.id)}
+                      className="text-cyan-600 hover:text-cyan-900 mr-4"
+                    >
+                      Expense
+                    </button>
                     {load.status !== 'delivered' && load.status !== 'cancelled' && (
                       <button
                         onClick={() => setConfirmAction({ type: 'complete', load })}
@@ -1101,6 +1270,9 @@ export default function LoadsPage() {
                     setSoldItemProfitRows([]);
                     setLoadInvoices([]);
                     setLoadPayments([]);
+                    setLoadExpenses([]);
+                    setExpenseError('');
+                    setExpenseSuccess('');
                   }}
                   className="rounded-full border border-white/40 bg-white/20 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/30"
                 >
@@ -1174,6 +1346,134 @@ export default function LoadsPage() {
                   <div className="rounded-xl border border-white/70 bg-white/80 p-3">
                     <p className="text-xs uppercase tracking-[0.12em] text-slate-500 mb-1">Notes</p>
                     <p className="text-sm text-slate-700">{selectedLoadDetails.notes || '-'}</p>
+                  </div>
+
+                  <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-cyan-50/40 p-4 shadow-sm">
+                    <div className="flex flex-col gap-2 border-b border-blue-100 pb-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">Load Expenses</p>
+                        <h4 className="text-base font-semibold text-blue-900">Fuel and Trip Expenses</h4>
+                      </div>
+                      <div className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-700">
+                        Delivery Cash Balance: {deliveryCashBalance.toFixed(2)}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">Date</label>
+                        <input
+                          type="date"
+                          value={expenseForm.date}
+                          onChange={(e) => setExpenseForm((prev) => ({ ...prev, date: e.target.value }))}
+                          className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">Category</label>
+                        <select
+                          value={expenseForm.category}
+                          onChange={(e) => setExpenseForm((prev) => ({ ...prev, category: e.target.value }))}
+                          className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                        >
+                          <option value="fuel">Fuel</option>
+                          <option value="toll">Toll</option>
+                          <option value="driver_allowance">Driver Allowance</option>
+                          <option value="maintenance">Maintenance</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">Amount</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={expenseForm.amount}
+                          onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
+                          placeholder="0.00"
+                          className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">Note</label>
+                        <input
+                          type="text"
+                          value={expenseForm.note}
+                          onChange={(e) => setExpenseForm((prev) => ({ ...prev, note: e.target.value }))}
+                          placeholder="Fuel refill, toll gate, etc."
+                          className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div className="text-xs text-blue-700">
+                        Posting this expense creates an <span className="font-semibold">out</span> transaction in Delivery Cash.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddLoadExpense}
+                        disabled={expenseSaving}
+                        className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:from-blue-700 hover:to-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {expenseSaving ? 'Saving...' : 'Add Expense'}
+                      </button>
+                    </div>
+
+                    {expenseError && (
+                      <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                        {expenseError}
+                      </div>
+                    )}
+                    {expenseSuccess && (
+                      <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
+                        {expenseSuccess}
+                      </div>
+                    )}
+
+                    <div className="mt-4 overflow-x-auto rounded-xl border border-blue-100 bg-white">
+                      <table className="min-w-full divide-y divide-blue-100 text-xs">
+                        <thead className="bg-blue-50">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium text-blue-700 uppercase">Date</th>
+                            <th className="px-3 py-2 text-left font-medium text-blue-700 uppercase">Category</th>
+                            <th className="px-3 py-2 text-left font-medium text-blue-700 uppercase">Reference</th>
+                            <th className="px-3 py-2 text-left font-medium text-blue-700 uppercase">Note</th>
+                            <th className="px-3 py-2 text-right font-medium text-blue-700 uppercase">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-blue-50 bg-white">
+                          {loadExpenses.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                                No expenses added for this load yet.
+                              </td>
+                            </tr>
+                          ) : (
+                            loadExpenses.map((expense) => (
+                              <tr key={expense.id}>
+                                <td className="px-3 py-2 text-slate-700">{new Date(expense.expense_date).toLocaleDateString()}</td>
+                                <td className="px-3 py-2 text-slate-700">{formatExpenseCategory(expense.expense_type)}</td>
+                                <td className="px-3 py-2 text-slate-700">{expense.reference || '-'}</td>
+                                <td className="px-3 py-2 text-slate-700">{expense.note || '-'}</td>
+                                <td className="px-3 py-2 text-right font-semibold text-rose-700">{Number(expense.amount || 0).toFixed(2)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                        {loadExpenses.length > 0 && (
+                          <tfoot className="bg-blue-50">
+                            <tr>
+                              <td colSpan={4} className="px-3 py-2 text-right font-semibold text-blue-800">Total Expenses</td>
+                              <td className="px-3 py-2 text-right font-semibold text-blue-900">
+                                {loadExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
                   </div>
 
                   {deliverySummary && (
@@ -1605,7 +1905,7 @@ export default function LoadsPage() {
                   <h3 className="mt-1 text-2xl font-bold">
                     {editingLoad ? 'Edit Load' : 'Create New Load'}
                   </h3>
-                  <p className="mt-1 text-sm text-emerald-50/90">Assign fleet, route, and weight details for dispatch operations.</p>
+                  <p className="mt-1 text-sm text-emerald-50/90">Assign fleet and route details for dispatch operations.</p>
                 </div>
                 <button
                   onClick={() => {
@@ -1717,25 +2017,6 @@ export default function LoadsPage() {
                           </option>
                         ))}
                       </select>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Load Details */}
-                <div className={modalSectionClass}>
-                  <h4 className="mb-4 text-base font-semibold text-slate-900">Load Details</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className={modalLabelClass}>Total Weight (kg)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={formData.total_weight}
-                        onChange={(e) => setFormData({ ...formData, total_weight: e.target.value })}
-                        className={modalInputClass}
-                        placeholder="2500.00"
-                        required
-                      />
                     </div>
                   </div>
                 </div>

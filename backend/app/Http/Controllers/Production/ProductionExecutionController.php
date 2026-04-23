@@ -186,8 +186,11 @@ class ProductionExecutionController extends Controller
                     return $row;
                 })->values()->all();
 
+                $batchNo = $this->generateBatchNo((string) ($plan->product?->code ?? 'PRD'));
+
                 $order = ProductionOrder::create([
                     'production_plan_id' => $plan->id,
+                    'batch_no' => $batchNo,
                     'product_id' => $plan->product_id,
                     'bom_id' => $bom->id,
                     'production_quantity' => $productionQuantity,
@@ -291,5 +294,18 @@ class ProductionExecutionController extends Controller
             'data' => $order->fresh(['product:id,name,code,unit', 'bom:id,product_id,version,batch_size', 'plan:id,plan_date,shift,order_number,status']),
             'message' => 'Production batch updated successfully',
         ]);
+    }
+
+    private function generateBatchNo(string $productCode): string
+    {
+        $datePart = now()->format('Ymd');
+        $code = strtoupper(preg_replace('/[^A-Z0-9]/', '', $productCode));
+        $prefix = ($code ? substr($code, 0, 6) : 'PRD') . '-' . $datePart;
+
+        $count = ProductionOrder::whereDate('created_at', now()->toDateString())
+            ->whereNotNull('batch_no')
+            ->count() + 1;
+
+        return 'BATCH-' . $prefix . '-' . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
     }
 }

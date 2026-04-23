@@ -9,6 +9,7 @@ import { createApiClient } from '../../../../lib/apiClient';
 type LedgerEntry = {
   id: string | number;
   date: string;
+  created_at?: string;
   type: 'in' | 'out';
   amount: number;
   note: string;
@@ -35,6 +36,25 @@ const money = (value: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+
+const formatDateTime = (value?: string) => {
+  if (!value) return '-';
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+};
 
 export default function AccountLedgerTemplate({
   title,
@@ -445,7 +465,7 @@ export default function AccountLedgerTemplate({
                 ) : (
                   paginatedEntries.map((entry, idx) => (
                     <tr key={entry.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                      <td className="px-4 py-3 text-sm text-gray-700">{new Date(entry.date).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(entry.created_at || entry.date)}</td>
                       <td className="px-4 py-3 text-sm">
                         <span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${entry.type === 'in' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
                           {entry.type === 'in' ? inTypeLabel : outTypeLabel}

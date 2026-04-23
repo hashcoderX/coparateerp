@@ -3,14 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 interface Load {
   id: number;
   load_number: string;
   vehicle_id: number;
   driver_id: number;
+  sales_ref_id?: number | null;
   route_id: number;
   status: 'pending' | 'in_transit' | 'delivered' | 'cancelled';
   load_date: string;
@@ -58,6 +57,19 @@ interface InventoryItem {
   unit: string;
 }
 
+type NoticeModalState = {
+  title: string;
+  message: string;
+  tone: 'success' | 'error' | 'info';
+};
+
+type ConfirmModalState = {
+  title: string;
+  message: string;
+  confirmText: string;
+  onConfirm: () => Promise<void> | void;
+};
+
 export default function LoadItemsPage() {
   const [token, setToken] = useState('');
   const [loads, setLoads] = useState<Load[]>([]);
@@ -67,6 +79,10 @@ export default function LoadItemsPage() {
   const [loading, setLoading] = useState(true);
   const [editingItem, setEditingItem] = useState<LoadItem | null>(null);
   const [showCsvModal, setShowCsvModal] = useState(false);
+  const [confirmingLoad, setConfirmingLoad] = useState(false);
+  const [noticeModal, setNoticeModal] = useState<NoticeModalState | null>(null);
+  const [confirmModal, setConfirmModal] = useState<ConfirmModalState | null>(null);
+  const [confirmModalLoading, setConfirmModalLoading] = useState(false);
   const [itemSearch, setItemSearch] = useState('');
   const [showItemDropdown, setShowItemDropdown] = useState(false);
   const [highlightedItemIndex, setHighlightedItemIndex] = useState(-1);
@@ -302,7 +318,11 @@ export default function LoadItemsPage() {
       resetForm();
     } catch (error: any) {
       console.error('Error saving load item:', error);
-      alert(error.response?.data?.message || 'Failed to save load item');
+      setNoticeModal({
+        title: 'Save Failed',
+        message: error.response?.data?.message || 'Failed to save load item',
+        tone: 'error',
+      });
     }
   };
 
@@ -322,18 +342,33 @@ export default function LoadItemsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (confirm('Are you sure you want to delete this load item?')) {
-      try {
-        await axios.delete(`http://localhost:8000/api/vehicle-loading/load-items/${id}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        fetchLoadItems();
-      } catch (error) {
-        console.error('Error deleting load item:', error);
-      }
-    }
+    setConfirmModal({
+      title: 'Delete Load Item',
+      message: 'Are you sure you want to delete this load item?',
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        try {
+          await axios.delete(`http://localhost:8000/api/vehicle-loading/load-items/${id}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          fetchLoadItems();
+          setNoticeModal({
+            title: 'Item Deleted',
+            message: 'Load item removed successfully.',
+            tone: 'success',
+          });
+        } catch (error) {
+          console.error('Error deleting load item:', error);
+          setNoticeModal({
+            title: 'Delete Failed',
+            message: 'Failed to delete load item.',
+            tone: 'error',
+          });
+        }
+      },
+    });
   };
 
   const handleCsvUpload = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -351,14 +386,22 @@ export default function LoadItemsPage() {
         },
       });
 
-      alert(response.data.message);
+      setNoticeModal({
+        title: 'CSV Upload',
+        message: response.data.message || 'CSV processed.',
+        tone: 'success',
+      });
       if (response.data.imported > 0) {
         fetchLoadItems();
         setShowCsvModal(false);
       }
     } catch (error: any) {
       console.error('Error uploading CSV:', error);
-      alert(error.response?.data?.message || 'Failed to upload CSV');
+      setNoticeModal({
+        title: 'Upload Failed',
+        message: error.response?.data?.message || 'Failed to upload CSV',
+        tone: 'error',
+      });
     }
   };
 
@@ -426,79 +469,73 @@ export default function LoadItemsPage() {
     }
   }, [showItemDropdown, filteredInventoryItems.length, highlightedItemIndex]);
 
-  const generateLoadConfirmationPDF = () => {
+  const handleConfirmLoad = async () => {
     if (!selectedLoad) return;
+    if (selectedLoad.status !== 'pending') return;
+    if (loadItems.length === 0) {
+      setNoticeModal({
+        title: 'Cannot Confirm Load',
+        message: 'Add at least one load item before confirming this load.',
+        tone: 'info',
+      });
+      return;
+    }
 
-    const doc = new jsPDF();
+    setConfirmModal({
+      title: 'Confirm Load',
+      message: 'Confirm this load? This action will set status to In Transit.',
+      confirmText: 'Confirm',
+      onConfirm: async () => {
+        try {
+          setConfirmingLoad(true);
+          await axios.put(`http://localhost:8000/api/vehicle-loading/loads/${selectedLoad.id}`, {
+            load_number: selectedLoad.load_number,
+            vehicle_id: selectedLoad.vehicle_id,
+            driver_id: selectedLoad.driver_id,
+            sales_ref_id: selectedLoad.sales_ref_id ?? null,
+            route_id: selectedLoad.route_id,
+            status: 'in_transit',
+            load_date: selectedLoad.load_date,
+            delivery_date: selectedLoad.delivery_date,
+            total_weight: selectedLoad.total_weight,
+            notes: selectedLoad.notes || null,
+          }, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
 
-    // Company Header
-    doc.setFontSize(20);
-    doc.setFont('helvetica', 'bold');
-    doc.text('LOAD CONFIRMATION', 105, 20, { align: 'center' });
-
-    // Load Details
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Load Details', 20, 40);
-
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Load Number: ${selectedLoad.load_number}`, 20, 50);
-    doc.text(`Vehicle: ${selectedLoad.vehicle?.registration_number || 'N/A'}`, 20, 58);
-    doc.text(`Driver: ${selectedLoad.driver?.name || 'N/A'}`, 20, 66);
-    doc.text(`Route: ${selectedLoad.route?.name || 'N/A'} (${selectedLoad.route?.origin || ''} to ${selectedLoad.route?.destination || ''})`, 20, 74);
-    doc.text(`Load Date: ${new Date(selectedLoad.load_date).toLocaleDateString()}`, 20, 82);
-    doc.text(`Status: ${selectedLoad.status.replace('_', ' ').toUpperCase()}`, 20, 90);
-    doc.text(`Total Items: ${loadItems.length}`, 20, 98);
-    doc.text(`Total Value: LKR ${getTotalValue().toLocaleString()}`, 20, 106);
-
-    // Load Items Table
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Loaded Items', 20, 125);
-
-    const tableData = loadItems.map(item => [
-      item.product_code,
-      item.name,
-      item.type.replace('_', ' '),
-      `LKR ${item.out_price.toLocaleString()}`,
-      `LKR ${item.sell_price.toLocaleString()}`,
-      item.qty.toString(),
-      `LKR ${(item.sell_price * item.qty).toLocaleString()}`
-    ]);
-
-    autoTable(doc, {
-      startY: 135,
-      head: [['Product Code', 'Name', 'Type', 'Out Price', 'Sell Price', 'Quantity', 'Total Value']],
-      body: tableData,
-      theme: 'grid',
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [41, 128, 185], textColor: 255 },
-      alternateRowStyles: { fillColor: [245, 245, 245] },
+          await fetchLoads();
+          setSelectedLoad((prev) => (prev ? { ...prev, status: 'in_transit' } : prev));
+          setNoticeModal({
+            title: 'Load Confirmed',
+            message: 'Load confirmed successfully.',
+            tone: 'success',
+          });
+        } catch (error) {
+          console.error('Error confirming load:', error);
+          setNoticeModal({
+            title: 'Confirmation Failed',
+            message: 'Failed to confirm load.',
+            tone: 'error',
+          });
+        } finally {
+          setConfirmingLoad(false);
+        }
+      },
     });
+  };
 
-    // Calculate approximate table height (header + rows)
-    const tableHeight = 15 + (loadItems.length * 10); // header height + row height per item
-    const finalY = 135 + tableHeight + 20;
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Authorization Signatures', 20, finalY);
+  const handleConfirmModalProceed = async () => {
+    if (!confirmModal) return;
 
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Prepared By: _______________________________ Date: _______________', 20, finalY + 15);
-    doc.text('Checked By: _______________________________ Date: _______________', 20, finalY + 30);
-    doc.text('Approved By: ______________________________ Date: _______________', 20, finalY + 45);
-
-    // Footer
-    const pageHeight = doc.internal.pageSize.height;
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    doc.text('This document confirms the loading of items into the vehicle.', 20, pageHeight - 20);
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 20, pageHeight - 10);
-
-    // Save the PDF
-    doc.save(`Load_Confirmation_${selectedLoad.load_number}.pdf`);
+    try {
+      setConfirmModalLoading(true);
+      await confirmModal.onConfirm();
+      setConfirmModal(null);
+    } finally {
+      setConfirmModalLoading(false);
+    }
   };
 
   if (loading) {
@@ -594,8 +631,8 @@ export default function LoadItemsPage() {
                 {editingItem ? 'Edit Load Item' : 'Add New Load Item'}
               </h3>
               <form onSubmit={handleSubmit}>
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
-                  <div className="relative z-50 item-search-box lg:col-span-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-4 items-end">
+                  <div className="relative z-50 item-search-box md:col-span-2 xl:col-span-3">
                     <label className={labelClass}>
                       Item Search
                     </label>
@@ -639,7 +676,7 @@ export default function LoadItemsPage() {
                       </div>
                     )}
                   </div>
-                  <div className="lg:col-span-2">
+                  <div className="xl:col-span-2">
                     <label className={labelClass}>
                       Product Code *
                     </label>
@@ -652,7 +689,7 @@ export default function LoadItemsPage() {
                       required
                     />
                   </div>
-                  <div className="lg:col-span-2">
+                  <div className="xl:col-span-2">
                     <label className={labelClass}>
                       Product Name *
                     </label>
@@ -665,7 +702,7 @@ export default function LoadItemsPage() {
                       required
                     />
                   </div>
-                  <div className="lg:col-span-1">
+                  <div className="xl:col-span-1">
                     <label className={labelClass}>
                       Type *
                     </label>
@@ -679,7 +716,7 @@ export default function LoadItemsPage() {
                       <option value="raw_material">Raw Material</option>
                     </select>
                   </div>
-                  <div className="lg:col-span-1">
+                  <div className="xl:col-span-1">
                     <label className={labelClass}>
                       Out Price *
                     </label>
@@ -693,7 +730,7 @@ export default function LoadItemsPage() {
                       required
                     />
                   </div>
-                  <div className="lg:col-span-1">
+                  <div className="xl:col-span-1">
                     <label className={labelClass}>
                       Sell Price *
                     </label>
@@ -707,7 +744,7 @@ export default function LoadItemsPage() {
                       required
                     />
                   </div>
-                  <div className="lg:col-span-1">
+                  <div className="xl:col-span-1">
                     <label className={labelClass}>
                       Quantity *
                     </label>
@@ -721,14 +758,14 @@ export default function LoadItemsPage() {
                       required
                     />
                   </div>
-                  <div className="lg:col-span-1 flex gap-2">
+                  <div className="md:col-span-2 xl:col-span-2 flex flex-col sm:flex-row gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setEditingItem(null);
                         resetForm();
                       }}
-                      className="w-1/2 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 flex items-center justify-center gap-2"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 flex items-center justify-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -737,7 +774,7 @@ export default function LoadItemsPage() {
                     </button>
                     <button
                       type="submit"
-                      className="w-1/2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700 flex items-center justify-center gap-2"
+                      className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-200/70 transition hover:from-emerald-700 hover:to-teal-700 flex items-center justify-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         {editingItem ? (
@@ -838,11 +875,11 @@ export default function LoadItemsPage() {
                 <h2 className="text-xl font-semibold text-slate-900">Load Items</h2>
                 <div className="space-x-3">
                   <button
-                    onClick={generateLoadConfirmationPDF}
-                    disabled={loadItems.length === 0}
+                    onClick={handleConfirmLoad}
+                    disabled={loadItems.length === 0 || !selectedLoad || selectedLoad.status !== 'pending' || confirmingLoad}
                     className="rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200/70 transition hover:from-violet-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Load Confirm (PDF)
+                    {confirmingLoad ? 'Confirming...' : selectedLoad?.status === 'pending' ? 'Load Confirm' : 'Load Confirmed'}
                   </button>
                   <button
                     onClick={() => setShowCsvModal(true)}
@@ -929,6 +966,65 @@ export default function LoadItemsPage() {
                     </button>
                   </div>
                 </form>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmModal && (
+          <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/45 px-4 py-8 backdrop-blur-sm">
+            <div className="mx-auto w-full max-w-md">
+              <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/95 shadow-[0_30px_100px_-45px_rgba(15,23,42,0.55)]">
+                <div className="border-b border-slate-200 bg-gradient-to-r from-slate-700 to-slate-600 px-6 py-4 text-white">
+                  <h3 className="text-lg font-semibold">{confirmModal.title}</h3>
+                </div>
+                <div className="px-6 py-5 text-sm text-slate-700">{confirmModal.message}</div>
+                <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmModal(null)}
+                    disabled={confirmModalLoading}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmModalProceed}
+                    disabled={confirmModalLoading}
+                    className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:from-emerald-700 hover:to-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {confirmModalLoading ? 'Please wait...' : confirmModal.confirmText}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {noticeModal && (
+          <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/45 px-4 py-8 backdrop-blur-sm">
+            <div className="mx-auto w-full max-w-md">
+              <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/95 shadow-[0_30px_100px_-45px_rgba(15,23,42,0.55)]">
+                <div className={`border-b px-6 py-4 text-white ${
+                  noticeModal.tone === 'success'
+                    ? 'border-emerald-200 bg-gradient-to-r from-emerald-600 to-teal-600'
+                    : noticeModal.tone === 'error'
+                      ? 'border-rose-200 bg-gradient-to-r from-rose-600 to-red-600'
+                      : 'border-sky-200 bg-gradient-to-r from-sky-600 to-blue-600'
+                }`}>
+                  <h3 className="text-lg font-semibold">{noticeModal.title}</h3>
+                </div>
+                <div className="px-6 py-5 text-sm text-slate-700">{noticeModal.message}</div>
+                <div className="flex justify-end border-t border-slate-200 px-6 py-4">
+                  <button
+                    type="button"
+                    onClick={() => setNoticeModal(null)}
+                    className="rounded-xl bg-gradient-to-r from-slate-700 to-slate-600 px-4 py-2 text-sm font-semibold text-white transition hover:from-slate-800 hover:to-slate-700"
+                  >
+                    OK
+                  </button>
                 </div>
               </div>
             </div>

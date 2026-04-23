@@ -70,6 +70,7 @@ class DistributionPaymentController extends Controller
             'load_id' => 'nullable|exists:loads,id',
             'customer_id' => 'required|exists:distribution_customers,id',
             'payment_date' => 'required|date',
+            'cheque_date' => 'nullable|date|required_if:payment_method,check',
             'amount' => 'required|numeric|gt:0',
             'payment_method' => 'required|in:check,cash,bank_transfer',
             'reference_no' => 'nullable|string|max:100',
@@ -108,6 +109,9 @@ class DistributionPaymentController extends Controller
                 'distribution_invoice_id' => $payload['distribution_invoice_id'] ?? null,
                 'customer_id' => $payload['customer_id'],
                 'payment_date' => $payload['payment_date'],
+                'cheque_date' => $payload['payment_method'] === 'check'
+                    ? ($payload['cheque_date'] ?? null)
+                    : null,
                 'amount' => $payload['amount'],
                 'payment_method' => $payload['payment_method'],
                 'reference_no' => $payload['reference_no'] ?? null,
@@ -195,6 +199,7 @@ class DistributionPaymentController extends Controller
         $validator = Validator::make($request->all(), [
             'payment_date' => 'required|date',
             'payment_method' => 'required|in:check,cash,bank_transfer',
+            'cheque_date' => 'nullable|date|required_if:payment_method,check',
             'reference_no' => 'nullable|string|max:100',
             'bank_name' => 'nullable|string|max:255',
             'status' => 'nullable|in:received,cleared,bounced,pending',
@@ -209,7 +214,12 @@ class DistributionPaymentController extends Controller
             ], 422);
         }
 
-        $payment->update($validator->validated());
+        $updateData = $validator->validated();
+        $updateData['cheque_date'] = ($updateData['payment_method'] ?? $payment->payment_method) === 'check'
+            ? ($updateData['cheque_date'] ?? $payment->cheque_date)
+            : null;
+
+        $payment->update($updateData);
 
         return response()->json([
             'success' => true,

@@ -17,7 +17,7 @@ class PackagingManagementController extends Controller
     public function approvedQcBatches(Request $request): JsonResponse
     {
         $query = QcInspection::with([
-            'productionOrder:id,product_id,produced_quantity,status,started_at,completed_at',
+            'productionOrder:id,product_id,batch_no,produced_quantity,status,started_at,completed_at',
             'productionOrder.product:id,name,code,unit',
             'productionOrder.plan:id,order_number,plan_date,shift',
         ])->where('quality_status', 'approved');
@@ -55,7 +55,7 @@ class PackagingManagementController extends Controller
     {
         $query = PackagingBatch::with([
             'qcInspection:id,production_order_id,inspection_date,quality_status,approved_quantity',
-            'productionOrder:id,product_id,status,started_at,completed_at',
+            'productionOrder:id,product_id,batch_no,status,started_at,completed_at',
             'productionOrder.product:id,name,code,unit',
             'productionOrder.plan:id,order_number,plan_date,shift',
         ]);
@@ -119,6 +119,8 @@ class PackagingManagementController extends Controller
             'packaging_material_quantity' => 'required|numeric|min:0',
             'packaging_material_unit' => 'required|string|max:30',
             'packed_quantity' => 'required|numeric|min:0',
+            'unit_price' => 'nullable|numeric|min:0',
+            'expiry_date' => 'nullable|date',
             'status' => 'nullable|in:planned,packed,dispatched',
             'notes' => 'nullable|string',
         ]);
@@ -151,19 +153,22 @@ class PackagingManagementController extends Controller
             $created = PackagingBatch::create([
                 'qc_inspection_id' => $inspection->id,
                 'production_order_id' => $inspection->production_order_id,
+                'batch_no' => $inspection->productionOrder?->batch_no,
                 'packaging_material_name' => $request->packaging_material_name,
                 'packaging_material_quantity' => $request->packaging_material_quantity,
                 'packaging_material_unit' => $request->packaging_material_unit,
                 'packed_quantity' => $request->packed_quantity,
+                'unit_price' => $request->unit_price ?? 0,
                 'status' => $status,
                 'label_code' => $labelCode,
                 'barcode_value' => $barcode,
                 'qr_value' => $qr,
                 'packed_at' => $packedAt,
+                'expiry_date' => $request->expiry_date,
                 'notes' => $request->notes,
             ]);
 
-            if ($status === 'dispatched') {
+            if (in_array($status, ['packed', 'dispatched'], true)) {
                 $this->syncBatchToMainStore($created);
             }
 
@@ -172,7 +177,7 @@ class PackagingManagementController extends Controller
 
         $batch = $batch->load([
             'qcInspection:id,production_order_id,inspection_date,quality_status,approved_quantity',
-            'productionOrder:id,product_id,status,started_at,completed_at',
+            'productionOrder:id,product_id,batch_no,status,started_at,completed_at',
             'productionOrder.product:id,name,code,unit',
             'productionOrder.plan:id,order_number,plan_date,shift',
         ]);
@@ -199,6 +204,8 @@ class PackagingManagementController extends Controller
             'packaging_material_quantity' => 'sometimes|numeric|min:0',
             'packaging_material_unit' => 'sometimes|string|max:30',
             'packed_quantity' => 'sometimes|numeric|min:0',
+            'unit_price' => 'sometimes|numeric|min:0',
+            'expiry_date' => 'nullable|date',
             'status' => 'sometimes|in:planned,packed,dispatched',
             'notes' => 'nullable|string',
         ]);
@@ -217,6 +224,8 @@ class PackagingManagementController extends Controller
                 'packaging_material_quantity',
                 'packaging_material_unit',
                 'packed_quantity',
+                'unit_price',
+                'expiry_date',
                 'status',
                 'notes',
             ]);
@@ -229,7 +238,7 @@ class PackagingManagementController extends Controller
             $batch->update($payload);
             $batch->refresh();
 
-            if ($batch->status === 'dispatched') {
+            if (in_array($batch->status, ['packed', 'dispatched'], true)) {
                 $this->syncBatchToMainStore($batch, $previousSyncedQty);
             }
         });
@@ -238,7 +247,7 @@ class PackagingManagementController extends Controller
             'success' => true,
             'data' => $batch->fresh([
                 'qcInspection:id,production_order_id,inspection_date,quality_status,approved_quantity',
-                'productionOrder:id,product_id,status,started_at,completed_at',
+                'productionOrder:id,product_id,batch_no,status,started_at,completed_at',
                 'productionOrder.product:id,name,code,unit',
                 'productionOrder.plan:id,order_number,plan_date,shift',
             ]),
@@ -328,13 +337,22 @@ class PackagingManagementController extends Controller
         $info['store_tag'] = 'main_store';
         $info['stock_source'] = 'packaging';
         $info['production_product_id'] = $product->id;
+        $info['last_batch_no'] = $batch->batch_no;
         $info['last_packaging_batch_id'] = $batch->id;
         $info['last_label_code'] = $batch->label_code;
         $info['last_barcode_value'] = $batch->barcode_value;
         $info['last_qr_value'] = $batch->qr_value;
+        $info['last_batch_unit_price'] = (float) ($batch->unit_price ?? 0);
+        $info['last_batch_expiry_date'] = optional($batch->expiry_date)->toDateString();
         $info['last_synced_at'] = Carbon::now()->toDateTimeString();
 
         $item->current_stock = round((float) $item->current_stock + $delta, 3);
+        if ((float) ($batch->unit_price ?? 0) > 0) {
+            $item->unit_price = (float) $batch->unit_price;
+        }
+        if ($batch->expiry_date) {
+            $item->expiry_date = $batch->expiry_date;
+        }
         $item->additional_info = $info;
         $item->save();
 

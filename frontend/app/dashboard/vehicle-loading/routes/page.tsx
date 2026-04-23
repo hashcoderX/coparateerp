@@ -10,16 +10,11 @@ type RouteType = 'local' | 'inter_city' | 'highway';
 type Route = {
   id: number;
   name: string;
-  origin: string;
-  destination: string;
-  distance_km: number;
-  estimated_duration_hours: number;
   status: RouteStatus;
   route_type: RouteType;
-  toll_charges: number;
-  fuel_estimate_liters: number;
   description: string;
-  waypoints: string[];
+  created_at?: string;
+  updated_at?: string;
 };
 
 const PAGE_SIZE = 10;
@@ -37,16 +32,9 @@ export default function RoutesPage() {
   const [editingRoute, setEditingRoute] = useState<Route | null>(null);
   const [formData, setFormData] = useState({
     name: '',
-    origin: '',
-    destination: '',
-    distance_km: '',
-    estimated_duration_hours: '',
     status: 'active' as RouteStatus,
     route_type: 'local' as RouteType,
-    toll_charges: '',
-    fuel_estimate_liters: '',
     description: '',
-    waypoints: '',
   });
 
   const router = useRouter();
@@ -70,31 +58,6 @@ export default function RoutesPage() {
 
     load();
   }, [token]);
-
-  const parseWaypoints = (input: unknown): string[] => {
-    if (Array.isArray(input)) {
-      return input.map((point) => String(point || '').trim()).filter(Boolean);
-    }
-
-    const raw = String(input || '').trim();
-    if (!raw) return [];
-
-    if ((raw.startsWith('[') && raw.endsWith(']')) || (raw.startsWith('{') && raw.endsWith('}'))) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return parsed.map((point) => String(point || '').trim()).filter(Boolean);
-        }
-      } catch {
-        // Fall back to CSV parsing below.
-      }
-    }
-
-    return raw
-      .split(',')
-      .map((point) => point.trim())
-      .filter(Boolean);
-  };
 
   const fetchRoutes = async (authToken: string) => {
     try {
@@ -135,18 +98,20 @@ export default function RoutesPage() {
         return {
           id: Number(route?.id || 0),
           name: String(route?.name || '-'),
-          origin: String(route?.origin || '-'),
-          destination: String(route?.destination || '-'),
-          distance_km: Number(route?.distance_km || 0),
-          estimated_duration_hours: Number(route?.estimated_duration_hours || 0),
           status,
           route_type: routeType,
-          toll_charges: Number(route?.toll_charges || 0),
-          fuel_estimate_liters: Number(route?.fuel_estimate_liters || 0),
           description: String(route?.description || ''),
-          waypoints: parseWaypoints(route?.waypoints),
+          created_at: route?.created_at ? String(route.created_at) : undefined,
+          updated_at: route?.updated_at ? String(route.updated_at) : undefined,
         };
-      }).filter((route) => route.id > 0);
+      })
+        .filter((route) => route.id > 0)
+        .sort((a, b) => {
+          const at = new Date(a.updated_at || a.created_at || 0).getTime();
+          const bt = new Date(b.updated_at || b.created_at || 0).getTime();
+          if (bt !== at) return bt - at;
+          return b.id - a.id;
+        });
 
       setRoutes(normalized);
     } catch (error) {
@@ -161,16 +126,9 @@ export default function RoutesPage() {
   const resetForm = () => {
     setFormData({
       name: '',
-      origin: '',
-      destination: '',
-      distance_km: '',
-      estimated_duration_hours: '',
       status: 'active',
       route_type: 'local',
-      toll_charges: '',
-      fuel_estimate_liters: '',
       description: '',
-      waypoints: '',
     });
   };
 
@@ -186,16 +144,9 @@ export default function RoutesPage() {
     try {
       const routeData = {
         name: formData.name,
-        origin: formData.origin,
-        destination: formData.destination,
-        distance_km: parseFloat(formData.distance_km),
-        estimated_duration_hours: parseFloat(formData.estimated_duration_hours),
         status: formData.status,
         route_type: formData.route_type,
-        toll_charges: parseFloat(formData.toll_charges) || 0,
-        fuel_estimate_liters: parseFloat(formData.fuel_estimate_liters) || 0,
         description: formData.description,
-        waypoints: formData.waypoints,
       };
 
       if (editingRoute) {
@@ -220,16 +171,9 @@ export default function RoutesPage() {
     setEditingRoute(route);
     setFormData({
       name: route.name,
-      origin: route.origin,
-      destination: route.destination,
-      distance_km: route.distance_km.toString(),
-      estimated_duration_hours: route.estimated_duration_hours.toString(),
       status: route.status,
       route_type: route.route_type,
-      toll_charges: route.toll_charges.toString(),
-      fuel_estimate_liters: route.fuel_estimate_liters.toString(),
       description: route.description,
-      waypoints: route.waypoints.join(', '),
     });
     setShowModal(true);
   };
@@ -250,7 +194,7 @@ export default function RoutesPage() {
 
   const filteredRoutes = useMemo(() => {
     return routes.filter((route) => {
-      const haystack = `${route.name} ${route.origin} ${route.destination} ${route.description} ${route.waypoints.join(' ')}`.toLowerCase();
+      const haystack = `${route.name} ${route.description} ${route.route_type} ${route.status}`.toLowerCase();
       const matchesSearch = haystack.includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === 'all' || route.status === statusFilter;
       const matchesType = routeTypeFilter === 'all' || route.route_type === routeTypeFilter;
@@ -294,10 +238,7 @@ export default function RoutesPage() {
 
   const activeCount = routes.filter((route) => route.status === 'active').length;
   const inactiveCount = routes.filter((route) => route.status === 'inactive').length;
-  const totalDistance = routes.reduce((sum, route) => sum + Number(route.distance_km || 0), 0);
-  const averageDuration = routes.length
-    ? routes.reduce((sum, route) => sum + Number(route.estimated_duration_hours || 0), 0) / routes.length
-    : 0;
+  const latestUpdatedRoute = routes[0] || null;
 
   const getStatusClass = (status: RouteStatus): string => {
     if (status === 'active') return 'border border-emerald-200 bg-emerald-100 text-emerald-700';
@@ -311,9 +252,9 @@ export default function RoutesPage() {
   };
 
   const getRouteTypeIcon = (type: RouteType): string => {
-    if (type === 'local') return '??';
-    if (type === 'inter_city') return '??';
-    return '???';
+    if (type === 'local') return 'L';
+    if (type === 'inter_city') return 'I';
+    return 'H';
   };
 
   const modalInputClass = 'w-full rounded-xl border border-emerald-200/80 bg-white/90 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100';
@@ -336,7 +277,7 @@ export default function RoutesPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Routes Management</h1>
-            <p className="mt-1 text-sm text-slate-600">Plan and manage delivery paths with costs, duration, and waypoints in one table view.</p>
+            <p className="mt-1 text-sm text-slate-600">Manage route master data with latest collected records and operational status.</p>
           </div>
           <button
             onClick={() => {
@@ -363,7 +304,7 @@ export default function RoutesPage() {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by name, origin, destination or waypoints"
+              placeholder="Search by route name, type, status, or description"
               className="w-full rounded-xl border border-emerald-200 bg-gradient-to-b from-white to-emerald-50/40 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition focus:border-emerald-400 focus:outline-none focus:ring-4 focus:ring-emerald-100"
             />
           </div>
@@ -406,14 +347,10 @@ export default function RoutesPage() {
             <thead className="bg-slate-100/80">
               <tr>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Route</th>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Path</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Type</th>
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Distance</th>
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Duration</th>
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Toll</th>
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Fuel</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Status</th>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Waypoints</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Created</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Last Updated</th>
                 <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Actions</th>
               </tr>
             </thead>
@@ -424,25 +361,21 @@ export default function RoutesPage() {
                     <div className="font-semibold text-slate-900">{route.name}</div>
                     <div className="text-xs text-slate-500">{route.description || '-'}</div>
                   </td>
-                  <td className="whitespace-nowrap px-5 py-3.5 text-sm text-slate-700">
-                    {route.origin} ? {route.destination}
-                  </td>
                   <td className="whitespace-nowrap px-5 py-3.5">
                     <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase ${getRouteTypeClass(route.route_type)}`}>
                       {getRouteTypeIcon(route.route_type)} {route.route_type.replace('_', ' ')}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-5 py-3.5 text-right text-sm text-slate-700">{route.distance_km.toFixed(1)} km</td>
-                  <td className="whitespace-nowrap px-5 py-3.5 text-right text-sm text-slate-700">{route.estimated_duration_hours.toFixed(1)} h</td>
-                  <td className="whitespace-nowrap px-5 py-3.5 text-right text-sm text-slate-700">{route.toll_charges.toFixed(2)}</td>
-                  <td className="whitespace-nowrap px-5 py-3.5 text-right text-sm text-slate-700">{route.fuel_estimate_liters.toFixed(1)} L</td>
                   <td className="whitespace-nowrap px-5 py-3.5">
                     <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase ${getStatusClass(route.status)}`}>
                       {route.status}
                     </span>
                   </td>
-                  <td className="max-w-[220px] px-5 py-3.5 text-xs text-slate-600">
-                    {route.waypoints.length > 0 ? route.waypoints.join(' ? ') : '-'}
+                  <td className="whitespace-nowrap px-5 py-3.5 text-sm text-slate-700">
+                    {route.created_at ? new Date(route.created_at).toLocaleString() : '-'}
+                  </td>
+                  <td className="whitespace-nowrap px-5 py-3.5 text-sm text-slate-700">
+                    {route.updated_at ? new Date(route.updated_at).toLocaleString() : '-'}
                   </td>
                   <td className="whitespace-nowrap px-5 py-3.5 text-right text-sm font-medium">
                     <button onClick={() => handleEdit(route)} className="mr-3 text-indigo-600 hover:text-indigo-900">Edit</button>
@@ -453,7 +386,7 @@ export default function RoutesPage() {
 
               {paginatedRoutes.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-6 py-10 text-center">
+                  <td colSpan={6} className="px-6 py-10 text-center">
                     <div className="text-base font-medium text-slate-800">No Routes Found</div>
                     <p className="mt-1 text-sm text-slate-500">
                       {searchTerm || statusFilter !== 'all' || routeTypeFilter !== 'all'
@@ -518,13 +451,15 @@ export default function RoutesPage() {
         </div>
 
         <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Total Distance</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{totalDistance.toFixed(1)} km</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Total Routes</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{routes.length}</p>
         </div>
 
         <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Avg Duration</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{averageDuration.toFixed(1)} h</p>
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Latest Updated</p>
+          <p className="mt-2 text-sm font-bold text-slate-900">
+            {latestUpdatedRoute?.updated_at ? new Date(latestUpdatedRoute.updated_at).toLocaleString() : '-'}
+          </p>
         </div>
       </section>
 
@@ -536,7 +471,7 @@ export default function RoutesPage() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-100">Route Planner</p>
                   <h3 className="mt-1 text-2xl font-bold">{editingRoute ? 'Edit Route' : 'Create New Route'}</h3>
-                  <p className="mt-1 text-sm text-emerald-50/90">Define route path, cost profile, and waypoints for delivery operations.</p>
+                  <p className="mt-1 text-sm text-emerald-50/90">Create route using only basic details.</p>
                 </div>
                 <button
                   onClick={closeModal}
@@ -588,98 +523,6 @@ export default function RoutesPage() {
                       </select>
                     </div>
                   </div>
-                </div>
-
-                <div className={modalSectionClass}>
-                  <h4 className="mb-4 text-base font-semibold text-slate-900">Route Details</h4>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className={modalLabelClass}>Origin</label>
-                      <input
-                        type="text"
-                        value={formData.origin}
-                        onChange={(e) => setFormData({ ...formData, origin: e.target.value })}
-                        className={modalInputClass}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className={modalLabelClass}>Destination</label>
-                      <input
-                        type="text"
-                        value={formData.destination}
-                        onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
-                        className={modalInputClass}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className={modalLabelClass}>Distance (km)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={formData.distance_km}
-                        onChange={(e) => setFormData({ ...formData, distance_km: e.target.value })}
-                        className={modalInputClass}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className={modalLabelClass}>Duration (hours)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={formData.estimated_duration_hours}
-                        onChange={(e) => setFormData({ ...formData, estimated_duration_hours: e.target.value })}
-                        className={modalInputClass}
-                        required
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className={modalSectionClass}>
-                  <h4 className="mb-4 text-base font-semibold text-slate-900">Cost Information</h4>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className={modalLabelClass}>Toll Charges (LKR)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={formData.toll_charges}
-                        onChange={(e) => setFormData({ ...formData, toll_charges: e.target.value })}
-                        className={modalInputClass}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className={modalLabelClass}>Fuel Estimate (L)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={formData.fuel_estimate_liters}
-                        onChange={(e) => setFormData({ ...formData, fuel_estimate_liters: e.target.value })}
-                        className={modalInputClass}
-                        required
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className={modalSectionClass}>
-                  <h4 className="mb-4 text-base font-semibold text-slate-900">Route Path</h4>
-                  <label className={modalLabelClass}>Waypoints (comma separated)</label>
-                  <input
-                    type="text"
-                    value={formData.waypoints}
-                    onChange={(e) => setFormData({ ...formData, waypoints: e.target.value })}
-                    className={modalInputClass}
-                    placeholder="Stop 1, Stop 2, Stop 3"
-                  />
-                  <p className="mt-1 text-xs text-slate-500">Enter intermediate stops separated by commas.</p>
                 </div>
 
                 <div className={modalSectionClass}>

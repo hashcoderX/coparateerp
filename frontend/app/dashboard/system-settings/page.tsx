@@ -4,6 +4,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
+type CompanyRow = {
+  id: number;
+  name: string;
+  logo_path?: string | null;
+  logo_url?: string | null;
+  updated_at?: string;
+};
+
 export default function SystemSettingsPage() {
   const [token, setToken] = useState('');
   const [accessReady, setAccessReady] = useState(false);
@@ -12,6 +20,12 @@ export default function SystemSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [systemEnabled, setSystemEnabled] = useState(true);
+  const [companyName, setCompanyName] = useState('');
+  const [companyLogoUrl, setCompanyLogoUrl] = useState('');
+  const [logoLoading, setLogoLoading] = useState(false);
+  const [logoLoadError, setLogoLoadError] = useState(false);
+
+  const API_BASE = 'http://localhost:8000';
 
   const router = useRouter();
 
@@ -60,6 +74,7 @@ export default function SystemSettingsPage() {
         }
 
         await fetchSystemSetting(token);
+        await fetchCompanyLogo(token);
       } catch (error) {
         console.error('Error loading system settings access:', error);
         router.push('/dashboard');
@@ -87,6 +102,66 @@ export default function SystemSettingsPage() {
       alert('Failed to load system settings.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const buildLogoUrl = (company: CompanyRow): string => {
+    const rawUrl = String(company.logo_url || '').trim();
+    const logoPath = String(company.logo_path || '').trim();
+    const cacheSuffix = company.updated_at ? `?v=${encodeURIComponent(company.updated_at)}` : '';
+
+    if (rawUrl) {
+      if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+        const pathIndex = rawUrl.indexOf('/storage/');
+        if (pathIndex >= 0) {
+          return `${API_BASE}${rawUrl.slice(pathIndex)}${cacheSuffix}`;
+        }
+        return `${rawUrl}${cacheSuffix}`;
+      }
+
+      if (rawUrl.startsWith('/')) {
+        return `${API_BASE}${rawUrl}${cacheSuffix}`;
+      }
+
+      return `${API_BASE}/${rawUrl}${cacheSuffix}`;
+    }
+
+    if (logoPath) {
+      const normalized = logoPath.replace(/^\/+/, '');
+      return `${API_BASE}/storage/${normalized}${cacheSuffix}`;
+    }
+
+    return '';
+  };
+
+  const fetchCompanyLogo = async (authToken?: string) => {
+    const tokenToUse = authToken || token;
+    if (!tokenToUse) return;
+
+    try {
+      setLogoLoading(true);
+      setLogoLoadError(false);
+      const res = await axios.get(`${API_BASE}/api/companies`, {
+        headers: { Authorization: `Bearer ${tokenToUse}` },
+      });
+
+      const companies: CompanyRow[] = Array.isArray(res.data) ? res.data : [];
+      const company = companies[0];
+
+      if (!company) {
+        setCompanyName('');
+        setCompanyLogoUrl('');
+        return;
+      }
+
+      setCompanyName(company.name || '');
+      setCompanyLogoUrl(buildLogoUrl(company));
+    } catch (error) {
+      console.error('Error fetching company logo:', error);
+      setCompanyLogoUrl('');
+      setCompanyName('');
+    } finally {
+      setLogoLoading(false);
     }
   };
 
@@ -248,6 +323,46 @@ export default function SystemSettingsPage() {
           )}
         </section>
       </main>
+
+      <section className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+        <div className="rounded-2xl border border-white/70 bg-white/85 backdrop-blur-lg shadow-xl p-5 md:p-6">
+          <h3 className="text-sm font-semibold text-gray-900 mb-2">Company Logo</h3>
+          <p className="text-sm text-gray-600 mb-4">This logo is loaded from Company Settings and used for branding across the system.</p>
+
+          {logoLoading ? (
+            <div className="text-sm text-gray-500">Loading logo...</div>
+          ) : companyLogoUrl && !logoLoadError ? (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="h-20 w-44 rounded-xl border border-gray-200 bg-white p-2 flex items-center justify-center overflow-hidden">
+                <img
+                  src={companyLogoUrl}
+                  alt={`${companyName || 'Company'} logo`}
+                  className="max-h-full max-w-full object-contain"
+                  onError={() => setLogoLoadError(true)}
+                />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-800">{companyName || 'Company'}</p>
+                <p className="text-xs text-gray-500 mt-1 break-all">{companyLogoUrl}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Logo not available or failed to load. Please verify logo upload in Company Settings.
+            </div>
+          )}
+
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => fetchCompanyLogo()}
+              className="px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Reload Logo
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

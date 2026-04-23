@@ -113,6 +113,27 @@ class BomController extends Controller
         ], 201);
     }
 
+    public function destroyRawMaterial(RawMaterial $rawMaterial): JsonResponse
+    {
+        $isUsedInBom = DB::table('bom_items')
+            ->where('material_id', $rawMaterial->id)
+            ->exists();
+
+        if ($isUsedInBom) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot remove this raw material because it is already used in BOM recipes.',
+            ], 422);
+        }
+
+        $rawMaterial->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Raw material removed successfully',
+        ]);
+    }
+
     public function boms(): JsonResponse
     {
         $boms = BomHeader::with([

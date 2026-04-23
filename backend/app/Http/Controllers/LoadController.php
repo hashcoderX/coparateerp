@@ -47,7 +47,7 @@ class LoadController extends Controller
             'status' => 'in:pending,in_transit,delivered,cancelled',
             'load_date' => 'required|date|after_or_equal:today',
             'delivery_date' => 'nullable|date|after_or_equal:load_date',
-            'total_weight' => 'numeric|min:0',
+            'total_weight' => 'nullable|numeric|min:0',
             'notes' => 'nullable|string'
         ]);
 
@@ -58,7 +58,12 @@ class LoadController extends Controller
             ], 422);
         }
 
-        $load = Load::create($request->all());
+        $payload = $validator->validated();
+        if (!array_key_exists('total_weight', $payload)) {
+            $payload['total_weight'] = 0;
+        }
+
+        $load = Load::create($payload);
 
         return response()->json([
             'message' => 'Load created successfully',
@@ -88,7 +93,7 @@ class LoadController extends Controller
             'status' => 'in:pending,in_transit,delivered,cancelled',
             'load_date' => 'required|date',
             'delivery_date' => 'nullable|date|after_or_equal:load_date',
-            'total_weight' => 'numeric|min:0',
+            'total_weight' => 'nullable|numeric|min:0',
             'notes' => 'nullable|string'
         ]);
 
@@ -99,7 +104,8 @@ class LoadController extends Controller
             ], 422);
         }
 
-        $load->update($request->all());
+        $payload = $validator->validated();
+        $load->update($payload);
 
         return response()->json([
             'message' => 'Load updated successfully',

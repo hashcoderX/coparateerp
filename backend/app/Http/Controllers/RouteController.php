@@ -25,16 +25,16 @@ class RouteController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'origin' => 'required|string|max:255',
-            'destination' => 'required|string|max:255',
-            'distance_km' => 'required|numeric|min:0',
-            'estimated_duration_hours' => 'required|numeric|min:0',
+            'origin' => 'nullable|string|max:255',
+            'destination' => 'nullable|string|max:255',
+            'distance_km' => 'nullable|numeric|min:0',
+            'estimated_duration_hours' => 'nullable|numeric|min:0',
             'status' => 'in:active,inactive',
             'route_type' => 'required|in:local,inter_city,highway',
-            'toll_charges' => 'numeric|min:0',
-            'fuel_estimate_liters' => 'numeric|min:0',
+            'toll_charges' => 'nullable|numeric|min:0',
+            'fuel_estimate_liters' => 'nullable|numeric|min:0',
             'description' => 'nullable|string',
-            'waypoints' => 'nullable|string'
+            'waypoints' => 'nullable'
         ]);
 
         if ($validator->fails()) {
@@ -44,18 +44,14 @@ class RouteController extends Controller
             ], 422);
         }
 
-        // Process waypoints - convert comma-separated string to array
-        $waypoints = null;
-        if ($request->waypoints) {
-            $waypoints = array_map('trim', explode(',', $request->waypoints));
-        }
+        $waypoints = $this->parseWaypoints($request->input('waypoints'));
 
         $route = Route::create([
             'name' => $request->name,
-            'origin' => $request->origin,
-            'destination' => $request->destination,
-            'distance_km' => $request->distance_km,
-            'estimated_duration_hours' => $request->estimated_duration_hours,
+            'origin' => $request->origin ?? '',
+            'destination' => $request->destination ?? '',
+            'distance_km' => $request->distance_km ?? 0,
+            'estimated_duration_hours' => $request->estimated_duration_hours ?? 0,
             'status' => $request->status ?? 'active',
             'route_type' => $request->route_type,
             'toll_charges' => $request->toll_charges ?? 0,
@@ -85,16 +81,16 @@ class RouteController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'origin' => 'required|string|max:255',
-            'destination' => 'required|string|max:255',
-            'distance_km' => 'required|numeric|min:0',
-            'estimated_duration_hours' => 'required|numeric|min:0',
+            'origin' => 'nullable|string|max:255',
+            'destination' => 'nullable|string|max:255',
+            'distance_km' => 'nullable|numeric|min:0',
+            'estimated_duration_hours' => 'nullable|numeric|min:0',
             'status' => 'in:active,inactive',
             'route_type' => 'required|in:local,inter_city,highway',
-            'toll_charges' => 'numeric|min:0',
-            'fuel_estimate_liters' => 'numeric|min:0',
+            'toll_charges' => 'nullable|numeric|min:0',
+            'fuel_estimate_liters' => 'nullable|numeric|min:0',
             'description' => 'nullable|string',
-            'waypoints' => 'nullable|string'
+            'waypoints' => 'nullable'
         ]);
 
         if ($validator->fails()) {
@@ -104,18 +100,14 @@ class RouteController extends Controller
             ], 422);
         }
 
-        // Process waypoints - convert comma-separated string to array
-        $waypoints = null;
-        if ($request->waypoints) {
-            $waypoints = array_map('trim', explode(',', $request->waypoints));
-        }
+        $waypoints = $this->parseWaypoints($request->input('waypoints'));
 
         $route->update([
             'name' => $request->name,
-            'origin' => $request->origin,
-            'destination' => $request->destination,
-            'distance_km' => $request->distance_km,
-            'estimated_duration_hours' => $request->estimated_duration_hours,
+            'origin' => $request->origin ?? '',
+            'destination' => $request->destination ?? '',
+            'distance_km' => $request->distance_km ?? 0,
+            'estimated_duration_hours' => $request->estimated_duration_hours ?? 0,
             'status' => $request->status ?? 'active',
             'route_type' => $request->route_type,
             'toll_charges' => $request->toll_charges ?? 0,
@@ -140,5 +132,21 @@ class RouteController extends Controller
         return response()->json([
             'message' => 'Route deleted successfully'
         ]);
+    }
+
+    private function parseWaypoints(mixed $rawWaypoints): ?array
+    {
+        if (is_array($rawWaypoints)) {
+            $normalized = array_values(array_filter(array_map(static fn($point) => trim((string) $point), $rawWaypoints)));
+            return empty($normalized) ? null : $normalized;
+        }
+
+        $raw = trim((string) ($rawWaypoints ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        $parsed = array_values(array_filter(array_map('trim', explode(',', $raw))));
+        return empty($parsed) ? null : $parsed;
     }
 }

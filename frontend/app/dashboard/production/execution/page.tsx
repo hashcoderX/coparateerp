@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
+type StepKey = 'step1' | 'step2' | 'step3' | 'step4';
+
 type QueueRow = {
   id: number;
   plan_date: string;
@@ -19,6 +21,7 @@ type QueueRow = {
 
 type BatchRow = {
   id: number;
+  batch_no?: string | null;
   production_plan_id?: number | null;
   production_quantity: number;
   produced_quantity: number;
@@ -40,6 +43,8 @@ export default function ProductionExecutionPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [activeStep, setActiveStep] = useState<StepKey>('step1');
 
   const [queue, setQueue] = useState<QueueRow[]>([]);
   const [batches, setBatches] = useState<BatchRow[]>([]);
@@ -69,6 +74,23 @@ export default function ProductionExecutionPage() {
 
   const authHeaders = (authToken: string) => ({ Authorization: `Bearer ${authToken}` });
 
+  const stepTabs: Array<{ key: StepKey; label: string }> = [
+    { key: 'step1', label: 'Step 1: Start Batch' },
+    { key: 'step2', label: 'Step 2: Update Batch' },
+    { key: 'step3', label: 'Step 3: Active Monitor' },
+    { key: 'step4', label: 'Step 4: History' },
+  ];
+
+  const readableStatus = (status: string) => status.replace('_', ' ');
+
+  const statusBadgeClass = (status: string) => {
+    if (status === 'completed') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+    if (status === 'in_progress' || status === 'started') return 'bg-blue-100 text-blue-700 border-blue-200';
+    if (status === 'order_created' || status === 'scheduled') return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+    if (status === 'cancelled') return 'bg-red-100 text-red-700 border-red-200';
+    return 'bg-gray-100 text-gray-700 border-gray-200';
+  };
+
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
     if (!storedToken || storedToken === 'undefined' || storedToken === 'null') {
@@ -82,6 +104,7 @@ export default function ProductionExecutionPage() {
     try {
       setLoading(true);
       setMessage('');
+      setErrorMessage('');
       const [queueRes, batchesRes, historyRes] = await Promise.all([
         axios.get(`${API_URL}/api/production/execution/queue`, { headers: authHeaders(authToken) }),
         axios.get(`${API_URL}/api/production/execution/active-batches`, { headers: authHeaders(authToken) }),
@@ -107,7 +130,7 @@ export default function ProductionExecutionPage() {
         router.push('/');
         return;
       }
-      setMessage(error?.response?.data?.message || 'Failed to load execution data.');
+      setErrorMessage(error?.response?.data?.message || 'Failed to load execution data.');
     } finally {
       setLoading(false);
     }
@@ -121,16 +144,19 @@ export default function ProductionExecutionPage() {
   const applyHistoryFilters = async () => {
     if (!token) return;
     await loadData(token);
+    setActiveStep('step4');
   };
 
   const exportHistoryCsv = () => {
     if (historyRows.length === 0) {
-      alert('No history rows available to export.');
+      setErrorMessage('No history rows available to export.');
+      setMessage('');
       return;
     }
 
     const headers = [
       'Batch ID',
+      'Batch No',
       'Order Number',
       'Plan Date',
       'Product Code',
@@ -149,6 +175,7 @@ export default function ProductionExecutionPage() {
 
     const rows = historyRows.map((row) => [
       row.id,
+      row.batch_no || '',
       row.plan?.order_number || '',
       row.plan?.plan_date || '',
       row.product?.code || '',
@@ -180,8 +207,11 @@ export default function ProductionExecutionPage() {
 
   const startBatch = async () => {
     if (!token) return;
+    setMessage('');
+    setErrorMessage('');
+
     if (!selectedPlanId) {
-      alert('Select a queued plan first.');
+      setErrorMessage('Select a queued plan first.');
       return;
     }
 
@@ -203,11 +233,13 @@ export default function ProductionExecutionPage() {
       setWorkerName('');
       setStartNotes('');
       setMessage('Production batch started successfully. Raw materials consumed from inventory.');
+      setErrorMessage('');
       await loadData(token);
+      setActiveStep('step2');
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to start production batch.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
     } finally {
       setSaving(false);
     }
@@ -215,8 +247,11 @@ export default function ProductionExecutionPage() {
 
   const updateBatch = async () => {
     if (!token) return;
+    setMessage('');
+    setErrorMessage('');
+
     if (!updateBatchId) {
-      alert('Select active batch first.');
+      setErrorMessage('Select active batch first.');
       return;
     }
 
@@ -235,11 +270,18 @@ export default function ProductionExecutionPage() {
 
       setUpdateNotes('');
       setMessage('Production batch updated successfully.');
+      setErrorMessage('');
       await loadData(token);
+
+      if (updateStatus === 'completed' || updateStatus === 'cancelled') {
+        setActiveStep('step4');
+      } else {
+        setActiveStep('step3');
+      }
     } catch (error: any) {
       const apiMessage = error?.response?.data?.message || 'Failed to update batch.';
       const firstError = Object.values(error?.response?.data?.errors || {})?.[0] as string[] | undefined;
-      alert(firstError?.[0] || apiMessage);
+      setErrorMessage(firstError?.[0] || apiMessage);
     } finally {
       setSaving(false);
     }
@@ -282,7 +324,32 @@ export default function ProductionExecutionPage() {
       </nav>
 
       <main className="relative z-10 max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-6">
+        <section className="rounded-xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-800 shadow-sm">
+          <p className="font-semibold">Execution flow</p>
+          <p className="mt-1">1) Pick queued plan and start batch, 2) Update produced and wastage, 3) Monitor active batches, 4) Filter and export history.</p>
+        </section>
+
+        <section className="rounded-xl border border-white/70 bg-white/90 px-3 py-3 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {stepTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveStep(tab.key)}
+                className={`rounded-lg px-3 py-2 text-xs sm:text-sm font-medium transition ${
+                  activeStep === tab.key
+                    ? 'bg-amber-600 text-white shadow'
+                    : 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
         {message && <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{message}</div>}
+        {errorMessage && <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{errorMessage}</div>}
 
         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="rounded-xl border border-white/60 bg-white/85 backdrop-blur-lg p-4 shadow-sm">
@@ -299,9 +366,10 @@ export default function ProductionExecutionPage() {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
+        <div className={`grid grid-cols-1 xl:grid-cols-2 gap-6 ${activeStep === 'step1' || activeStep === 'step2' ? '' : 'hidden'}`}>
+          <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5 ${activeStep === 'step1' ? '' : 'hidden'}`}>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Start Production Batch</h2>
+            <p className="text-xs text-gray-500 mb-4">Starting a batch will consume planned raw materials from inventory based on BOM.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Queued Production Plan</label>
@@ -336,8 +404,9 @@ export default function ProductionExecutionPage() {
             </button>
           </section>
 
-          <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5">
+          <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl p-5 ${activeStep === 'step2' ? '' : 'hidden'}`}>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Update Active Batch Status</h2>
+            <p className="text-xs text-gray-500 mb-4">Use this after production progress to update final output and wastage accurately.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Active Batch</label>
@@ -390,7 +459,7 @@ export default function ProductionExecutionPage() {
           </section>
         </div>
 
-        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl overflow-hidden">
+        <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl overflow-hidden ${activeStep === 'step3' ? '' : 'hidden'}`}>
           <div className="px-4 py-3 border-b border-gray-200/80 bg-gradient-to-r from-amber-50 to-orange-50 text-sm font-semibold text-gray-800">Active Production Batches</div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -398,6 +467,7 @@ export default function ProductionExecutionPage() {
                 <tr>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Batch No</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Target</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Produced</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Wastage</th>
@@ -407,12 +477,13 @@ export default function ProductionExecutionPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
                 {batches.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">No active batches found.</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500">No active batches found.</td></tr>
                 ) : (
                   batches.map((batch) => (
                     <tr key={batch.id} className="hover:bg-amber-50/40 transition-colors">
                       <td className="px-4 py-2.5 text-sm text-gray-800 font-medium">#{batch.id}</td>
                       <td className="px-4 py-2.5 text-sm text-gray-700">{batch.product?.code || '-'} - {batch.product?.name || '-'}</td>
+                      <td className="px-4 py-2.5 text-xs text-indigo-700 font-semibold">{batch.batch_no || '-'}</td>
                       <td className="px-4 py-2.5 text-sm text-right text-gray-700">{Number(batch.production_quantity || 0).toFixed(3)}</td>
                       <td className="px-4 py-2.5 text-sm text-right text-emerald-700 font-medium">{Number(batch.produced_quantity || 0).toFixed(3)}</td>
                       <td className="px-4 py-2.5 text-sm text-right text-red-700 font-medium">{Number(batch.wastage_quantity || 0).toFixed(3)}</td>
@@ -421,7 +492,11 @@ export default function ProductionExecutionPage() {
                         Workstation: {batch.workstation_name || '-'}<br />
                         Worker: {batch.worker_name || '-'}
                       </td>
-                      <td className="px-4 py-2.5 text-sm text-amber-700 font-semibold">{batch.status}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(batch.status)}`}>
+                          {readableStatus(batch.status)}
+                        </span>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -430,7 +505,7 @@ export default function ProductionExecutionPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl overflow-hidden">
+        <section className={`rounded-2xl border border-white/60 bg-white/90 backdrop-blur-lg shadow-xl overflow-hidden ${activeStep === 'step4' ? '' : 'hidden'}`}>
           <div className="px-4 py-3 border-b border-gray-200/80 bg-gradient-to-r from-slate-50 to-gray-100 text-sm font-semibold text-gray-800">Completed/Cancelled Batch History</div>
 
           <div className="p-4 border-b border-gray-100">
@@ -469,6 +544,7 @@ export default function ProductionExecutionPage() {
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order #</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Batch No</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Target</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Produced</th>
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Wastage</th>
@@ -478,13 +554,14 @@ export default function ProductionExecutionPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
                 {historyRows.length === 0 ? (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500">No history rows found for selected filters.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500">No history rows found for selected filters.</td></tr>
                 ) : (
                   historyRows.map((row) => (
                     <tr key={row.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-2.5 text-sm text-gray-800 font-medium">#{row.id}</td>
                       <td className="px-4 py-2.5 text-sm text-indigo-700">{row.plan?.order_number || '-'}</td>
                       <td className="px-4 py-2.5 text-sm text-gray-700">{row.product?.code || '-'} - {row.product?.name || '-'}</td>
+                      <td className="px-4 py-2.5 text-xs text-indigo-700 font-semibold">{row.batch_no || '-'}</td>
                       <td className="px-4 py-2.5 text-sm text-right text-gray-700">{Number(row.production_quantity || 0).toFixed(3)}</td>
                       <td className="px-4 py-2.5 text-sm text-right text-emerald-700 font-medium">{Number(row.produced_quantity || 0).toFixed(3)}</td>
                       <td className="px-4 py-2.5 text-sm text-right text-red-700 font-medium">{Number(row.wastage_quantity || 0).toFixed(3)}</td>

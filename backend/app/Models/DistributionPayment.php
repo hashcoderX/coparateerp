@@ -13,6 +13,7 @@ class DistributionPayment extends Model
         'load_id',
         'customer_id',
         'payment_date',
+        'cheque_date',
         'amount',
         'payment_method',
         'reference_no',
@@ -24,6 +25,7 @@ class DistributionPayment extends Model
 
     protected $casts = [
         'payment_date' => 'date',
+        'cheque_date' => 'date',
         'amount' => 'decimal:2',
     ];
 

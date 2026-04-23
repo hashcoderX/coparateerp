@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\HR\EmployeeDocumentController;
 use App\Http\Controllers\Api\HR\EmployeeEducationController;
 use App\Http\Controllers\Api\HR\EmployeeExperienceController;
 use App\Http\Controllers\Api\Purchasing\GRNController;
+use App\Http\Controllers\LoadExpenseController;
 use App\Models\User;
 use App\Http\Controllers\LoadController;
 use Illuminate\Http\Request;
@@ -73,6 +74,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('cheque-registry', [\App\Http\Controllers\ChequeRegistryController::class, 'index']);
     Route::post('cheque-registry/register', [\App\Http\Controllers\ChequeRegistryController::class, 'registerReceived']);
     Route::post('cheque-registry/{id}/deposit', [\App\Http\Controllers\ChequeRegistryController::class, 'deposit']);
+    Route::post('cheque-registry/{id}/return', [\App\Http\Controllers\ChequeRegistryController::class, 'returnCheque']);
+    Route::post('cheque-registry/{id}/end-clearance', [\App\Http\Controllers\ChequeRegistryController::class, 'endClearance']);
     Route::post('cheque-registry/issue', [\App\Http\Controllers\ChequeRegistryController::class, 'issueCheque']);
     Route::get('system-settings', [SystemSettingController::class, 'show']);
     Route::put('system-settings', [SystemSettingController::class, 'update']);
@@ -197,6 +200,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('production/products', [\App\Http\Controllers\Production\BomController::class, 'storeProduct']);
     Route::get('production/raw-materials', [\App\Http\Controllers\Production\BomController::class, 'rawMaterials']);
     Route::post('production/raw-materials', [\App\Http\Controllers\Production\BomController::class, 'storeRawMaterial']);
+    Route::delete('production/raw-materials/{rawMaterial}', [\App\Http\Controllers\Production\BomController::class, 'destroyRawMaterial']);
     Route::get('production/boms', [\App\Http\Controllers\Production\BomController::class, 'boms']);
     Route::post('production/boms', [\App\Http\Controllers\Production\BomController::class, 'storeBom']);
     Route::get('production/boms/{bomId}', [\App\Http\Controllers\Production\BomController::class, 'showBom']);
@@ -225,6 +229,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('vehicle-loading/routes', \App\Http\Controllers\RouteController::class);
     Route::apiResource('vehicle-loading/loads', LoadController::class);
     Route::get('vehicle-loading/loads/{load}/delivery-summary', [LoadController::class, 'deliverySummary']);
+    Route::get('vehicle-loading/loads/{load}/expenses', [LoadExpenseController::class, 'index']);
+    Route::post('vehicle-loading/loads/{load}/expenses', [LoadExpenseController::class, 'store']);
     Route::apiResource('vehicle-loading/load-items', \App\Http\Controllers\LoadItemController::class);
     Route::post('vehicle-loading/load-items/upload-csv', [\App\Http\Controllers\LoadItemController::class, 'uploadCsv']);
 

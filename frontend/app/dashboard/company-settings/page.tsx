@@ -73,8 +73,47 @@ export default function CompanySettingsPage() {
   ]);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState('');
+  const [logoPreviewIsObjectUrl, setLogoPreviewIsObjectUrl] = useState(false);
+  const [logoPreviewError, setLogoPreviewError] = useState(false);
 
   const router = useRouter();
+
+  const API_BASE = 'http://localhost:8000';
+
+  const normalizeLogoUrl = (company?: CompanyProfile | null): string => {
+    if (!company) return '';
+
+    const rawUrl = String(company.logo_url || '').trim();
+    const rawPath = String(company.logo_path || '').trim();
+
+    if (rawUrl) {
+      if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+        return rawUrl;
+      }
+
+      if (rawUrl.startsWith('/')) {
+        return `${API_BASE}${rawUrl}`;
+      }
+
+      return `${API_BASE}/${rawUrl}`;
+    }
+
+    if (rawPath) {
+      return `${API_BASE}/storage/${rawPath.replace(/^\/+/, '')}`;
+    }
+
+    return '';
+  };
+
+  const setLogoPreviewValue = (value: string, isObjectUrl: boolean) => {
+    if (logoPreviewIsObjectUrl && logoPreview && logoPreview !== value) {
+      URL.revokeObjectURL(logoPreview);
+    }
+
+    setLogoPreview(value);
+    setLogoPreviewIsObjectUrl(isObjectUrl);
+    setLogoPreviewError(false);
+  };
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -211,7 +250,7 @@ export default function CompanySettingsPage() {
     setBankAccounts([{ bank_name: '', account_no: '', current_balance: '0' }]);
     setChequeAccounts([{ bank_name: '', account_no: '', current_balance: '0' }]);
     setLogoFile(null);
-    setLogoPreview('');
+    setLogoPreviewValue('', false);
   };
 
   const openCreate = () => {
@@ -264,9 +303,17 @@ export default function CompanySettingsPage() {
     }
 
     setLogoFile(null);
-    setLogoPreview(company.logo_url || '');
+    setLogoPreviewValue(normalizeLogoUrl(company), false);
     setShowForm(true);
   };
+
+  useEffect(() => {
+    return () => {
+      if (logoPreviewIsObjectUrl && logoPreview) {
+        URL.revokeObjectURL(logoPreview);
+      }
+    };
+  }, [logoPreview, logoPreviewIsObjectUrl]);
 
   const addBankAccountRow = () => {
     setBankAccounts((prev) => [...prev, { bank_name: '', account_no: '', current_balance: '0' }]);
@@ -800,14 +847,28 @@ export default function CompanySettingsPage() {
                     const file = e.target.files?.[0] || null;
                     setLogoFile(file);
                     if (file) {
-                      setLogoPreview(URL.createObjectURL(file));
+                      const objectUrl = URL.createObjectURL(file);
+                      setLogoPreviewValue(objectUrl, true);
+                    } else {
+                      setLogoPreviewValue(editingCompanyId ? normalizeLogoUrl(activeCompany) : '', false);
                     }
                   }}
                   className="w-full rounded-lg border border-emerald-200 text-sm text-black px-2.5 py-2.5 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-100 file:px-2.5 file:py-1.5 file:text-emerald-700"
                 />
+                {logoFile && (
+                  <p className="mt-1 text-xs text-emerald-700">Selected file: {logoFile.name}</p>
+                )}
                 {logoPreview && (
                   <div className="mt-2">
-                    <img src={logoPreview} alt="Logo preview" className="h-16 w-auto object-contain rounded border border-gray-200 bg-white p-1" />
+                    <img
+                      src={logoPreview}
+                      alt="Logo preview"
+                      onError={() => setLogoPreviewError(true)}
+                      className="h-16 w-auto object-contain rounded border border-gray-200 bg-white p-1"
+                    />
+                    {logoPreviewError && (
+                      <p className="mt-1 text-xs text-red-600">Unable to preview image. Please choose another file or re-upload.</p>
+                    )}
                   </div>
                 )}
                 <p className="mt-1 text-xs text-emerald-700">Accepted: JPG, PNG, WEBP. Max size: 2MB.</p>
